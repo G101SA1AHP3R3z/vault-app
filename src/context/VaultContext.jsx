@@ -142,7 +142,28 @@ export function VaultProvider({ children }) {
     }
   };
 
-  // --- THE MISSING PIN FUNCTIONS ---
+  // --- DELETE MEDIA (The photo executioner) ---
+  const deleteMediaFromProject = async (projectId, sessionId, mediaId) => {
+    if (!user || !projectId) return;
+    const projectRef = doc(db, "projects", projectId);
+    const snap = await getDoc(projectRef);
+    if (!snap.exists()) return;
+
+    const data = snap.data();
+    const sessions = (data.sessions || []).map((session) => {
+      if (session.id !== sessionId) return session;
+      const media = (session.media || []).filter((m) => m.id !== mediaId);
+      return { ...session, media };
+    });
+
+    await updateDoc(projectRef, { sessions });
+
+    if (activeProject?.id === projectId) {
+      setActiveProject((p) => (p ? { ...p, sessions } : p));
+    }
+  };
+
+  // --- THE HOLY TRINITY OF PINS ---
   const addHotspotToMedia = async (projectId, sessionId, mediaId, hotspotData) => {
     if (!user || !projectId) return;
     const projectRef = doc(db, "projects", projectId);
@@ -157,7 +178,7 @@ export function VaultProvider({ children }) {
         const hotspots = Array.isArray(m.hotspots) ? m.hotspots : [];
         return {
           ...m,
-          hotspots: [...hotspots, { id: `h-${Date.now()}`, ...hotspotData }],
+          hotspots: [...hotspots, { id: hotspotData.id || `h-${Date.now()}`, ...hotspotData }],
         };
       });
       return { ...session, media };
@@ -240,21 +261,16 @@ export function VaultProvider({ children }) {
   const value = {
     user,
     authReady,
-    view,
-    setView,
-    tab,
-    setTab,
-    activeProject,
-    setActiveProject,
-    activeMedia,
-    setActiveMedia,
-    search,
-    setSearch,
+    view, setView,
+    tab, setTab,
+    activeProject, setActiveProject,
+    activeMedia, setActiveMedia,
+    search, setSearch,
     filteredProjects,
     addProject,
     deleteProject,
     addMediaToProject,
-    // The Holy Trinity exported correctly this time
+    deleteMediaFromProject,
     addHotspotToMedia,
     updateHotspotInMedia,
     deleteHotspotFromMedia,
@@ -263,4 +279,5 @@ export function VaultProvider({ children }) {
   return <VaultContext.Provider value={value}>{children}</VaultContext.Provider>;
 }
 
+// THIS IS THE LINE YOU KILLED. IT IS NOW SAFE.
 export const useVault = () => useContext(VaultContext);

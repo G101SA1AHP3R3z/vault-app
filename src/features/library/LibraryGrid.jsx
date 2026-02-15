@@ -1,9 +1,9 @@
 import React from 'react';
-import { Plus } from 'lucide-react';
+import { Camera } from 'lucide-react';
 import { useVault } from '../../context/VaultContext';
 
-export default function LibraryGrid() {
-  const { filteredProjects, setActiveProject, setView, setTab } = useVault();
+export default function LibraryGrid({ onQuickAdd }) {
+  const { filteredProjects, setActiveProject, setView } = useVault();
 
   const openProject = (p) => {
     setActiveProject(p);
@@ -12,48 +12,52 @@ export default function LibraryGrid() {
 
   return (
     <div className="w-full pb-32 animate-in fade-in duration-500">
-      
-      {/* Header Area */}
-      <div className="px-5 pt-8 pb-6 flex justify-between items-center sticky top-0 bg-gray-50/95 backdrop-blur-sm z-10">
-        <h1 className="text-4xl font-black text-gray-900 tracking-tighter uppercase">Vault</h1>
-      </div>
-
-      {/* The 2-Column Grid */}
-      <div className="px-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* STRICT 2-COLUMN GRID */}
+      <div className="grid grid-cols-2 gap-3">
         {filteredProjects.map(project => (
           <div 
             key={project.id} 
-            className="aspect-[3/4] rounded-lg overflow-hidden relative cursor-pointer shadow-md group border border-gray-200"
+            className="aspect-[3/4] rounded-2xl overflow-hidden relative cursor-pointer shadow-lg group border border-gray-200 bg-gray-100"
             onClick={() => openProject(project)}
           >
-            {/* Logic to find a cover photo */}
             {project.coverPhoto ? (
                <img 
-               src={project.coverPhoto} 
-               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" 
-               alt="" 
-             />
+                 src={project.coverPhoto} 
+                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" 
+                 alt="" 
+               />
             ) : (
-              <div className="w-full h-full bg-gray-200 flex items-center justify-center text-gray-400 font-mono text-xs">
+              <div className="w-full h-full flex items-center justify-center text-gray-300 font-mono text-[10px] tracking-widest">
                 NO COVER
               </div>
             )}
             
-            {/* Dark Gradient Overlay */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-90" />
             
-            {/* Text Content */}
-            <div className="absolute bottom-4 left-4 right-4">
-              <h3 className="text-white font-bold text-lg leading-tight mb-1 line-clamp-2">{project.title}</h3>
-              <p className="text-[10px] font-bold text-gray-300 uppercase tracking-widest">
-                {project.status === 'graveyard' ? 'EXPIRING SOON' : (project.expiresIn || '30 DAYS')}
+            {/* Quick Capture Button */}
+            <button 
+              onClick={(e) => {
+                e.stopPropagation(); // Prevents opening the project
+                if (onQuickAdd) onQuickAdd(project);
+              }}
+              className="absolute top-2 right-2 w-8 h-8 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center text-white border border-white/20 hover:bg-white hover:text-black transition-all shadow-lg z-20"
+            >
+              <Camera className="w-4 h-4" />
+            </button>
+
+            <div className="absolute bottom-3 left-3 right-3">
+              <h3 className="text-white font-black text-sm leading-tight mb-1 line-clamp-2 uppercase tracking-tighter">
+                {project.title}
+              </h3>
+              <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">
+                {project.status === 'graveyard' ? 'EXPIRING' : (project.expiresIn || '30 DAYS')}
               </p>
             </div>
           </div>
         ))}
 
         {filteredProjects.length === 0 && (
-          <div className="col-span-full py-10 text-center text-gray-400 font-mono text-sm uppercase tracking-widest">
+          <div className="col-span-2 py-10 text-center text-gray-400 font-bold uppercase tracking-widest text-xs">
             No projects found.
           </div>
         )}

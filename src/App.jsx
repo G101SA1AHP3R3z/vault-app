@@ -47,7 +47,7 @@ function VaultShell() {
     tab, setTab,
     activeProject, setActiveProject,
     activeMedia, setActiveMedia,
-    addProject, addMediaToProject, deleteProject,
+    addProject, addMediaToProject, deleteProject, deleteMediaFromProject,
     addHotspotToMedia, updateHotspotInMedia, deleteHotspotFromMedia,
   } = useVault();
 
@@ -74,7 +74,7 @@ function VaultShell() {
   });
 
   const stageRef = useRef(null);
-  const trashRef = useRef(null); // Reference to our new trash drop-zone
+  const trashRef = useRef(null); 
 
   const navigateToMedia = (m, sessionId) => {
     setActiveMedia({ ...m, sessionId });
@@ -115,9 +115,23 @@ function VaultShell() {
 
   const handleDeleteProject = async () => {
     if (!activeProject) return;
-    if (confirm("Nuke this project?")) {
+    if (confirm("Nuke this entire project?")) {
       await deleteProject(activeProject.id);
     }
+  };
+
+  const handleDeleteCurrentMedia = async () => {
+    if (!activeProject || !currentMedia) return;
+    if (confirm("Permanently delete this photo?")) {
+      await deleteMediaFromProject(activeProject.id, currentMedia.sessionId, currentMedia.id);
+      goBack(); 
+    }
+  };
+
+  // --- NEW: QUICK ADD FROM GRID ---
+  const handleQuickAdd = (project) => {
+    setActiveProject(project);
+    setMediaOpen(true);
   };
 
   const currentMedia = useMemo(() => {
@@ -201,7 +215,6 @@ function VaultShell() {
     }
   };
 
-  // --- REWRITTEN DRAG/TAP WITH TRASH CHUTE ---
   const onPinPointerDown = (e, hotspot) => {
     e.preventDefault();
     e.stopPropagation();
@@ -243,7 +256,6 @@ function VaultShell() {
       const y = clamp01((clientY - rect.top) / rect.height);
       setOptimisticPin({ id: dragRef.current.hotspotId, x, y });
 
-      // Hitbox logic for the trash can
       if (trashRef.current) {
         const tRect = trashRef.current.getBoundingClientRect();
         const hovering =
@@ -268,7 +280,6 @@ function VaultShell() {
     const clientX = e.clientX ?? (e.changedTouches?.[0]?.clientX);
     const clientY = e.clientY ?? (e.changedTouches?.[0]?.clientY);
 
-    // Calculate if we dropped it directly into the trash
     let droppedInTrash = false;
     if (wasDragging && trashRef.current && clientX != null && clientY != null) {
       const tRect = trashRef.current.getBoundingClientRect();
@@ -327,7 +338,6 @@ function VaultShell() {
       <div className={`w-full transition-all duration-300 flex justify-center ${view === "dashboard" ? "md:pl-64" : ""}`}>
         <div className={`w-full ${view === "dashboard" ? "max-w-md" : "max-w-6xl"} min-h-screen bg-white shadow-2xl relative border-x border-gray-200`}>
           
-          {/* Dashboard Header */}
           {view === "project" && (
             <div className="px-4 pt-12 pb-3 flex justify-between items-center bg-white/80 backdrop-blur-md border-b border-gray-200 z-40 sticky top-0">
               <button onClick={goBack} className="flex items-center text-gray-600 hover:text-black transition-colors">
@@ -345,20 +355,21 @@ function VaultShell() {
             </div>
           )}
 
-          {/* DASHBOARD VIEW */}
           {view === "dashboard" && (
             <div className="p-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
+              {/* THIS IS THE ONLY VAULT HEADER NOW */}
               <div className="flex justify-between items-center mb-6 pt-8">
                 <h1 className="text-2xl font-black tracking-tight uppercase">Vault</h1>
                 <button onClick={() => setNewOpen(true)} className="w-10 h-10 rounded bg-black text-white flex items-center justify-center shadow-md active:scale-95 transition-transform">
                   <Plus className="w-5 h-5" />
                 </button>
               </div>
-              <LibraryGrid />
+              
+              {/* Grid with the quick add prop passed down */}
+              <LibraryGrid onQuickAdd={handleQuickAdd} />
             </div>
           )}
 
-          {/* PROJECT VIEW */}
           {view === "project" && activeProject && (
             <div className="p-5 md:p-10 animate-in slide-in-from-right-4 duration-300">
               <div className="flex items-start justify-between gap-4">
@@ -396,9 +407,15 @@ function VaultShell() {
                     <h3 className="font-black text-sm uppercase text-black">{session.title}</h3>
                     <p className="text-xs font-mono text-gray-400">{session.date}</p>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                     {(session.media || []).map((m) => (
-                      <MediaCard key={m.id} item={m} onClick={() => navigateToMedia(m, session.id)} />
+                      <MediaCard 
+                        key={m.id} 
+                        item={m} 
+                        onClick={() => navigateToMedia(m, session.id)} 
+                        // HERE IS THE NEW IN-SESSION DELETE PROP
+                        onDelete={() => deleteMediaFromProject(activeProject.id, session.id, m.id)}
+                      />
                     ))}
                   </div>
                 </div>
@@ -406,25 +423,25 @@ function VaultShell() {
             </div>
           )}
 
-          {/* STRICT FULL-SCREEN MEDIA VIEW */}
           {view === "media" && activeProject && currentMedia && (
             <div className="fixed inset-0 z-[100] bg-black flex flex-col overflow-hidden touch-none animate-in fade-in zoom-in-95 duration-200">
               
-              {/* Media Header (Always visible above the image) */}
               <div className="absolute top-0 inset-x-0 p-6 z-50 flex justify-between items-center pointer-events-none">
                 <button onClick={goBack} className="pointer-events-auto w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white border border-white/10 hover:bg-black/80 transition-colors">
                   <ChevronLeft className="w-6 h-6" />
                 </button>
+                <button onClick={handleDeleteCurrentMedia} className="pointer-events-auto w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-red-400 border border-white/10 hover:bg-black/80 hover:text-red-500 transition-colors">
+                  <Trash2 className="w-5 h-5" />
+                </button>
               </div>
 
-              {/* The Glass Box / Stage */}
               <div
                 ref={stageRef}
                 className={`w-full h-full relative flex items-center justify-center transition-all ${isAddPinMode ? "cursor-crosshair" : ""}`}
                 onClick={handleStageClickToAddPin}
                 onPointerMove={onStagePointerMove}
                 onPointerUp={onStagePointerUp}
-                onPointerLeave={onStagePointerUp} // Safety catch if finger slides off screen
+                onPointerLeave={onStagePointerUp} 
               >
                 <img
                   src={currentMedia.url}
@@ -448,7 +465,7 @@ function VaultShell() {
                       onPointerDown={(e) => {
                         if (!isAddPinMode) onPinPointerDown(e, h);
                       }}
-                      className={`absolute -translate-x-1/2 -translate-y-1/2 transition-all duration-100 ${
+                      className={`absolute -translate-x-1/2 -translate-y-1/2 transition-all duration-100 select-none touch-none ${
                         isAddPinMode 
                           ? 'pointer-events-none opacity-20 scale-75' 
                           : 'pointer-events-auto cursor-pointer z-10'
@@ -457,14 +474,23 @@ function VaultShell() {
                           ? 'scale-125 z-50' 
                           : 'hover:scale-110'
                       }`}
-                      style={{ left, top }}
+                      style={{ 
+                        left, 
+                        top,
+                        WebkitTouchCallout: 'none',
+                        WebkitUserSelect: 'none',
+                        userSelect: 'none'
+                      }}
                       aria-label="Pin"
                     >
-                      <div className={`w-9 h-9 rounded-full font-black text-xs flex items-center justify-center shadow-[0_0_20px_rgba(0,0,0,0.5)] border-2 transition-colors ${
-                        draggingPinId === h.id 
-                          ? 'bg-black text-white border-white' 
-                          : 'bg-white text-black border-transparent'
-                      }`}>
+                      <div 
+                        className={`w-9 h-9 rounded-full font-black text-xs flex items-center justify-center shadow-[0_0_20px_rgba(0,0,0,0.5)] border-2 transition-colors select-none ${
+                          draggingPinId === h.id 
+                            ? 'bg-black text-white border-white' 
+                            : 'bg-white text-black border-transparent'
+                        }`}
+                        style={{ pointerEvents: 'none' }} 
+                      >
                         {number}
                       </div>
                     </button>
@@ -472,10 +498,8 @@ function VaultShell() {
                 })}
               </div>
 
-              {/* Bottom Action Area (Always above the fold) */}
               <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-4 z-50 pointer-events-none">
                 
-                {/* Trash Chute (Replaces Add Pin when dragging) */}
                 <div 
                   ref={trashRef}
                   className={`absolute left-1/2 -translate-x-1/2 transition-all duration-300 pointer-events-auto ${
@@ -489,7 +513,6 @@ function VaultShell() {
                   </div>
                 </div>
 
-                {/* Add Pin Button (Hides when dragging) */}
                 <button
                   onClick={() => setIsAddPinMode(!isAddPinMode)}
                   className={`pointer-events-auto px-6 py-4 rounded-full font-black text-xs uppercase tracking-widest shadow-2xl transition-all flex items-center gap-2 ${
