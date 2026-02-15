@@ -10,9 +10,9 @@ import {
   Pencil,
   Loader2,
   MapPin,
-  Search as SearchIcon,
-  Expand,
-  Shrink,
+  Maximize2,
+  Minimize2,
+  StickyNote,
   ChevronRight,
 } from "lucide-react";
 
@@ -72,20 +72,10 @@ function AbstractCreamBackdrop({ children }) {
 
   return (
     <div className="min-h-screen relative" style={{ background: palette.paper }}>
-      {/* Subtle abstract shapes */}
       <div className="fixed inset-0 -z-10 overflow-hidden">
-        <div
-          className="absolute -top-28 -left-28 w-[520px] h-[520px] rounded-[48px] rotate-[18deg]"
-          style={{ background: palette.sun, opacity: 0.16 }}
-        />
-        <div
-          className="absolute top-10 -right-64 w-[820px] h-[300px] rounded-[60px] rotate-[-12deg]"
-          style={{ background: palette.sky, opacity: 0.10 }}
-        />
-        <div
-          className="absolute -bottom-44 left-16 w-[760px] h-[460px] rounded-[70px] rotate-[10deg]"
-          style={{ background: palette.breeze, opacity: 0.09 }}
-        />
+        <div className="absolute -top-28 -left-28 w-[520px] h-[520px] rounded-[48px] rotate-[18deg]" style={{ background: palette.sun, opacity: 0.16 }} />
+        <div className="absolute top-10 -right-64 w-[820px] h-[300px] rounded-[60px] rotate-[-12deg]" style={{ background: palette.sky, opacity: 0.10 }} />
+        <div className="absolute -bottom-44 left-16 w-[760px] h-[460px] rounded-[70px] rotate-[10deg]" style={{ background: palette.breeze, opacity: 0.09 }} />
         <div
           className="absolute inset-0"
           style={{
@@ -95,8 +85,30 @@ function AbstractCreamBackdrop({ children }) {
           }}
         />
       </div>
-
       {children}
+    </div>
+  );
+}
+
+/** --- Inline Search (so Search tab actually works) --- */
+function SearchBarInline({ value, onChange }) {
+  return (
+    <div
+      className="mb-4 rounded-[8px] px-3 py-2 flex items-center gap-2"
+      style={{
+        background: "rgba(255,255,255,0.62)",
+        border: "1px solid rgba(0,0,0,0.08)",
+        backdropFilter: "blur(12px)",
+      }}
+    >
+      <div className="text-black/35 text-xs font-semibold uppercase tracking-widest">Search</div>
+      <div className="flex-1" />
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Projects, tags…"
+        className="w-full bg-transparent outline-none text-sm text-black placeholder:text-black/35"
+      />
     </div>
   );
 }
@@ -143,17 +155,24 @@ function VaultShell() {
   const [newOpen, setNewOpen] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
 
-  // Pins
+  // --- PIN + SELECTION ---
   const [isAddPinMode, setIsAddPinMode] = useState(false);
-  const [pinOpen, setPinOpen] = useState(false);
-  const [pinDraft, setPinDraft] = useState({ label: "", note: "" });
-  const [pinTarget, setPinTarget] = useState(null);
+  const [selectedPinId, setSelectedPinId] = useState(null);
 
-  // New: media “dashboard” selection + layout
-  const [selectedHotspotId, setSelectedHotspotId] = useState(null);
-  const [focusMedia, setFocusMedia] = useState(false); // collapses bottom panel
+  // --- SHEET + FOCUS ---
+  const [isFocused, setIsFocused] = useState(false);
+  const [sheetY, setSheetY] = useState(0); // translateY in px (0 = fully up)
+  const sheetDragRef = useRef({
+    dragging: false,
+    startY: 0,
+    startSheetY: 0,
+  });
 
-  // Drag
+  // --- NOTES (UI only; persistence TODO) ---
+  const [isEditingNote, setIsEditingNote] = useState(false);
+  const [noteDraft, setNoteDraft] = useState("");
+
+  // --- DRAG & TRASH FOR PINS ---
   const [draggingPinId, setDraggingPinId] = useState(null);
   const [optimisticPin, setOptimisticPin] = useState(null);
   const [isHoveringTrash, setIsHoveringTrash] = useState(false);
@@ -172,6 +191,10 @@ function VaultShell() {
   const navigateToMedia = (m, sessionId) => {
     setActiveMedia({ ...m, sessionId });
     setView("media");
+    setIsFocused(false);
+    setSheetY(0);
+    setIsAddPinMode(false);
+    setSelectedPinId(null);
   };
 
   const goBack = () => {
@@ -179,8 +202,10 @@ function VaultShell() {
       setView("project");
       setActiveMedia(null);
       setIsAddPinMode(false);
-      setSelectedHotspotId(null);
-      setFocusMedia(false);
+      setIsFocused(false);
+      setSheetY(0);
+      setSelectedPinId(null);
+      setIsEditingNote(false);
     } else {
       setView("dashboard");
       setActiveProject(null);
@@ -210,7 +235,7 @@ function VaultShell() {
 
   const handleDeleteProject = async () => {
     if (!activeProject) return;
-    if (confirm("Delete this entire project?")) {
+    if (confirm("Nuke this entire project?")) {
       await deleteProject(activeProject.id);
     }
   };
@@ -224,28 +249,26 @@ function VaultShell() {
     return media ? { ...media, sessionId: sid } : null;
   }, [activeProject, activeMedia?.id, activeMedia?.sessionId]);
 
-  const currentHotspots = useMemo(() => currentMedia?.hotspots || [], [currentMedia?.hotspots]);
+  const currentHotspots = currentMedia?.hotspots || [];
 
-  // Auto-select first pin when media opens (if none selected)
+  // Keep selected pin sane
   useEffect(() => {
-    if (view !== "media") return;
-    if (!currentHotspots.length) {
-      setSelectedHotspotId(null);
-      return;
-    }
-    if (selectedHotspotId && currentHotspots.some((h) => h.id === selectedHotspotId)) return;
-    setSelectedHotspotId(currentHotspots[0]?.id || null);
+    if (!currentMedia) return;
+    const exists = currentHotspots.some((h) => h.id === selectedPinId);
+    if (!exists) setSelectedPinId(currentHotspots[0]?.id || null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, currentMedia?.id, currentHotspots.length]);
+  }, [currentMedia?.id, currentHotspots.length]);
 
-  const selectedHotspot = useMemo(() => {
-    if (!selectedHotspotId) return null;
-    return currentHotspots.find((h) => h.id === selectedHotspotId) || null;
-  }, [currentHotspots, selectedHotspotId]);
+  // Seed note draft when media changes
+  useEffect(() => {
+    if (!currentMedia) return;
+    setNoteDraft(currentMedia.note || "");
+    setIsEditingNote(false);
+  }, [currentMedia?.id]);
 
   const handleDeleteCurrentMedia = async () => {
     if (!activeProject || !currentMedia) return;
-    if (confirm("Permanently delete this media?")) {
+    if (confirm("Permanently delete this photo?")) {
       await deleteMediaFromProject(activeProject.id, currentMedia.sessionId, currentMedia.id);
       goBack();
     }
@@ -256,14 +279,12 @@ function VaultShell() {
     setMediaOpen(true);
   };
 
-  const openPinEditor = (sessionId, mediaId, hotspot) => {
-    setPinTarget({ sessionId, mediaId, hotspotId: hotspot.id });
-    setPinDraft({ label: hotspot.label || "", note: hotspot.note || "" });
-    setPinOpen(true);
-  };
-
+  /** ---------------------------
+   *  PINS: add + drag
+   *  --------------------------*/
   const handleStageClickToAddPin = async (e) => {
     if (!isAddPinMode) return;
+    if (isFocused) return; // requirement: focus hides pins + pin actions
 
     try {
       if (!activeProject || !currentMedia) return;
@@ -286,60 +307,22 @@ function VaultShell() {
         note: "",
       });
 
+      setSelectedPinId(newPinId);
       setIsAddPinMode(false);
-      setSelectedHotspotId(newPinId);
-      openPinEditor(currentMedia.sessionId, currentMedia.id, { id: newPinId, label: "", note: "" });
     } catch (err) {
       console.error("Failed to save pin:", err);
       alert("Failed to save pin. Check console.");
     }
   };
 
-  const savePinEdits = async () => {
-    if (!activeProject || !pinTarget) return;
-    try {
-      await updateHotspotInMedia(
-        activeProject.id,
-        pinTarget.sessionId,
-        pinTarget.mediaId,
-        pinTarget.hotspotId,
-        { label: pinDraft.label || "", note: pinDraft.note || "" }
-      );
-      setPinOpen(false);
-      setPinTarget(null);
-    } catch (e) {
-      console.error("Failed to update pin:", e);
-    }
-  };
-
-  const deletePin = async () => {
-    if (!activeProject || !pinTarget) return;
-    if (!confirm("Delete this pin?")) return;
-    try {
-      await deleteHotspotFromMedia(
-        activeProject.id,
-        pinTarget.sessionId,
-        pinTarget.mediaId,
-        pinTarget.hotspotId
-      );
-      setPinOpen(false);
-      setPinTarget(null);
-
-      // If we deleted the selected pin, move selection
-      if (selectedHotspotId === pinTarget.hotspotId) {
-        const remaining = currentHotspots.filter((h) => h.id !== pinTarget.hotspotId);
-        setSelectedHotspotId(remaining[0]?.id || null);
-      }
-    } catch (e) {
-      console.error("Failed to delete pin:", e);
-    }
-  };
-
-  // Long-press drag
   const onPinPointerDown = (e, hotspot) => {
     e.preventDefault();
     e.stopPropagation();
 
+    // TAP SHOULD ONLY SELECT (no auto open editor)
+    setSelectedPinId(hotspot.id);
+
+    // still allow long-press drag
     dragRef.current.hotspotId = hotspot.id;
     dragRef.current.startX = e.clientX;
     dragRef.current.startY = e.clientY;
@@ -353,7 +336,7 @@ function VaultShell() {
       dragRef.current.dragging = true;
       setDraggingPinId(hotspot.id);
       setOptimisticPin({ id: hotspot.id, x: hotspot.x, y: hotspot.y });
-    }, 900); // faster than 1500ms for better UX
+    }, 1500);
   };
 
   const onStagePointerMove = (e) => {
@@ -381,12 +364,7 @@ function VaultShell() {
 
       if (trashRef.current) {
         const tRect = trashRef.current.getBoundingClientRect();
-        const hovering =
-          clientX >= tRect.left &&
-          clientX <= tRect.right &&
-          clientY >= tRect.top &&
-          clientY <= tRect.bottom;
-
+        const hovering = clientX >= tRect.left && clientX <= tRect.right && clientY >= tRect.top && clientY <= tRect.bottom;
         if (hovering !== isHoveringTrash) setIsHoveringTrash(hovering);
       }
     }
@@ -406,11 +384,7 @@ function VaultShell() {
     let droppedInTrash = false;
     if (wasDragging && trashRef.current && clientX != null && clientY != null) {
       const tRect = trashRef.current.getBoundingClientRect();
-      droppedInTrash =
-        clientX >= tRect.left &&
-        clientX <= tRect.right &&
-        clientY >= tRect.top &&
-        clientY <= tRect.bottom;
+      droppedInTrash = clientX >= tRect.left && clientX <= tRect.right && clientY >= tRect.top && clientY <= tRect.bottom;
     }
 
     dragRef.current.hotspotId = null;
@@ -421,62 +395,106 @@ function VaultShell() {
     setOptimisticPin(null);
 
     if (!hotspotId) return;
+    if (!wasDragging) return;
 
-    // Not dragging => treat as select/open
-    if (!wasDragging) {
-      setSelectedHotspotId(hotspotId);
-      const hotspot = currentHotspots.find((h) => h.id === hotspotId);
-      if (hotspot && !isAddPinMode) openPinEditor(currentMedia.sessionId, currentMedia.id, hotspot);
-      return;
-    }
-
-    // Dropped in trash
     if (droppedInTrash && activeProject && currentMedia) {
       try {
         await deleteHotspotFromMedia(activeProject.id, currentMedia.sessionId, currentMedia.id, hotspotId);
+        if (selectedPinId === hotspotId) setSelectedPinId(null);
       } catch (err) {
         console.error("Failed to delete pin:", err);
       }
       return;
     }
 
-    // Save moved pin
     if (pinDataToSave && activeProject && currentMedia) {
       try {
-        await updateHotspotInMedia(
-          activeProject.id,
-          currentMedia.sessionId,
-          currentMedia.id,
-          hotspotId,
-          { x: pinDataToSave.x, y: pinDataToSave.y }
-        );
+        await updateHotspotInMedia(activeProject.id, currentMedia.sessionId, currentMedia.id, hotspotId, {
+          x: pinDataToSave.x,
+          y: pinDataToSave.y,
+        });
       } catch (err) {
         console.error("Failed to move pin:", err);
       }
     }
   };
 
-  // Pin navigation (bottom panel)
-  const goNextPin = () => {
-    if (!currentHotspots.length) return;
-    const idx = currentHotspots.findIndex((h) => h.id === selectedHotspotId);
-    const next = currentHotspots[(idx + 1) % currentHotspots.length];
-    setSelectedHotspotId(next.id);
+  /** ---------------------------
+   *  SHEET DRAG -> FOCUS
+   *  --------------------------*/
+  const SHEET_PEEK = 54; // px visible when focused
+  const SHEET_MAX_DOWN = 520; // clamp
+
+  const setFocusOn = (on) => {
+    setIsFocused(on);
+    setIsAddPinMode(false); // requirement: hide pins + add pin when focused
+    if (on) {
+      setSheetY(SHEET_MAX_DOWN);
+    } else {
+      setSheetY(0);
+    }
   };
 
-  const goPrevPin = () => {
+  const onSheetPointerDown = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    sheetDragRef.current.dragging = true;
+    sheetDragRef.current.startY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    sheetDragRef.current.startSheetY = sheetY;
+    try {
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    } catch {}
+  };
+
+  const onSheetPointerMove = (e) => {
+    if (!sheetDragRef.current.dragging) return;
+    const cy = e.clientY ?? e.touches?.[0]?.clientY;
+    if (cy == null) return;
+    const dy = cy - sheetDragRef.current.startY;
+    const next = Math.max(0, Math.min(SHEET_MAX_DOWN, sheetDragRef.current.startSheetY + dy));
+    setSheetY(next);
+  };
+
+  const onSheetPointerUp = () => {
+    if (!sheetDragRef.current.dragging) return;
+    sheetDragRef.current.dragging = false;
+
+    // Snap behavior
+    const threshold = 220; // if pulled down enough -> focus
+    if (sheetY > threshold) {
+      setIsFocused(true);
+      setIsAddPinMode(false);
+      setSheetY(SHEET_MAX_DOWN);
+    } else {
+      setIsFocused(false);
+      setSheetY(0);
+    }
+  };
+
+  /** ---------------------------
+   *  NOTES + PIN CONTENT
+   *  --------------------------*/
+  const selectedPin = useMemo(() => currentHotspots.find((h) => h.id === selectedPinId) || null, [currentHotspots, selectedPinId]);
+
+  const goNextPin = () => {
     if (!currentHotspots.length) return;
-    const idx = currentHotspots.findIndex((h) => h.id === selectedHotspotId);
-    const prev = currentHotspots[(idx - 1 + currentHotspots.length) % currentHotspots.length];
-    setSelectedHotspotId(prev.id);
+    const idx = currentHotspots.findIndex((h) => h.id === selectedPinId);
+    const next = idx < 0 ? 0 : (idx + 1) % currentHotspots.length;
+    setSelectedPinId(currentHotspots[next].id);
+  };
+
+  const saveNote = async () => {
+    // TODO: Persist this. Add a VaultContext method like:
+    // updateMediaNote(projectId, sessionId, mediaId, note)
+    // and call it here.
+    //
+    // For now, we just close the editor so UX flows.
+    setIsEditingNote(false);
   };
 
   return (
     <AbstractCreamBackdrop>
-      <div
-        className="min-h-screen text-gray-900 flex justify-center items-center antialiased selection:bg-black selection:text-white"
-        style={{ fontFamily: bodyFont }}
-      >
+      <div className="min-h-screen text-gray-900 flex justify-center items-center antialiased selection:bg-black selection:text-white" style={{ fontFamily: bodyFont }}>
         {view === "dashboard" && <Navigation currentTab={tab} setTab={setTab} />}
 
         <div className={`w-full transition-all duration-300 flex justify-center ${view === "dashboard" ? "md:pl-64" : ""}`}>
@@ -562,36 +580,8 @@ function VaultShell() {
                   </button>
                 </div>
 
-                {/* SEARCH (fixes your search tab “not working”) */}
-                {tab === "search" && (
-                  <div className="mb-4">
-                    <div
-                      className="flex items-center gap-2 px-3 h-11 rounded-[8px]"
-                      style={{
-                        background: "rgba(255,255,255,0.60)",
-                        border: "1px solid rgba(0,0,0,0.10)",
-                        backdropFilter: "blur(14px)",
-                      }}
-                    >
-                      <SearchIcon className="w-4 h-4 text-black/40" />
-                      <input
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search projects and tags…"
-                        className="w-full bg-transparent outline-none text-sm"
-                      />
-                      {search?.trim() ? (
-                        <button
-                          onClick={() => setSearch("")}
-                          className="h-8 px-2 rounded-[8px] text-xs font-semibold"
-                          style={{ background: "rgba(0,0,0,0.06)" }}
-                        >
-                          Clear
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                )}
+                {/* FIX: Search tab actually needs a search input */}
+                {tab === "search" && <SearchBarInline value={search} onChange={setSearch} />}
 
                 <LibraryGrid onQuickAdd={handleQuickAdd} />
               </div>
@@ -648,16 +638,11 @@ function VaultShell() {
                       boxShadow: "0 22px 60px -52px rgba(0,0,0,0.28)",
                     }}
                   >
-                    <button
-                      className="w-12 h-12 bg-black text-white rounded-full flex items-center justify-center shrink-0 shadow-lg hover:scale-105 transition-transform"
-                      title="Play"
-                    >
+                    <button className="w-12 h-12 bg-black text-white rounded-full flex items-center justify-center shrink-0 shadow-lg hover:scale-105 transition-transform" title="Play">
                       <Play className="w-5 h-5 ml-1" />
                     </button>
                     <div className="flex-1">
-                      <p className="text-[10px] font-semibold text-black/45 uppercase tracking-widest mb-1">
-                        Project Context
-                      </p>
+                      <p className="text-[10px] font-semibold text-black/45 uppercase tracking-widest mb-1">Project Context</p>
                       <p className="text-sm text-gray-900 leading-relaxed">“{activeProject.overallAudio}”</p>
                     </div>
                   </div>
@@ -687,332 +672,454 @@ function VaultShell() {
               </div>
             )}
 
-            {/* MEDIA VIEW — NEW “DASHBOARD” LAYOUT */}
+            {/* MEDIA VIEW — NEW DASHBOARD STYLE */}
             {view === "media" && activeProject && currentMedia && (
-              <div
-                className="fixed inset-0 z-[100] flex flex-col overflow-hidden"
-                style={{
-                  background:
-                    "radial-gradient(1200px 600px at 15% 10%, rgba(255,234,58,0.22) 0%, rgba(0,0,0,0) 55%), radial-gradient(900px 500px at 85% 15%, rgba(58,168,255,0.20) 0%, rgba(0,0,0,0) 55%), linear-gradient(180deg, rgba(11,11,12,0.92) 0%, rgba(11,11,12,0.88) 100%)",
-                }}
-              >
-                {/* Top controls */}
-                <div className="absolute top-0 inset-x-0 p-5 z-50 flex justify-between items-center pointer-events-none">
+              <div className="fixed inset-0 z-[100] overflow-hidden" style={{ background: palette.paper }}>
+                {/* Sticky top bar (always visible) */}
+                <div
+                  className="absolute top-0 inset-x-0 z-50 px-4 pt-4 pb-3 flex items-center justify-between"
+                  style={{
+                    background: "rgba(255,255,255,0.55)",
+                    backdropFilter: "blur(14px)",
+                    borderBottom: "1px solid rgba(0,0,0,0.08)",
+                  }}
+                >
                   <button
                     onClick={goBack}
-                    className="pointer-events-auto w-10 h-10 rounded-[8px] flex items-center justify-center text-white"
-                    style={{
-                      background: "rgba(255,255,255,0.12)",
-                      border: "1px solid rgba(255,255,255,0.14)",
-                      backdropFilter: "blur(14px)",
-                    }}
+                    className="h-11 px-3 rounded-[8px] inline-flex items-center gap-2 text-sm font-semibold"
+                    style={{ background: "rgba(255,255,255,0.70)", border: "1px solid rgba(0,0,0,0.08)" }}
                   >
-                    <ChevronLeft className="w-6 h-6" />
+                    <ChevronLeft className="w-5 h-5" /> Back
                   </button>
 
-                  <div className="pointer-events-auto flex items-center gap-2">
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setFocusMedia((v) => !v)}
-                      className="h-10 px-3 rounded-[8px] text-xs font-semibold inline-flex items-center gap-2 text-white"
+                      onClick={() => setFocusOn(!isFocused)}
+                      className="h-11 px-3 rounded-[8px] inline-flex items-center gap-2 text-sm font-semibold"
                       style={{
-                        background: "rgba(255,255,255,0.12)",
-                        border: "1px solid rgba(255,255,255,0.14)",
-                        backdropFilter: "blur(14px)",
+                        background: isFocused ? palette.sun : "rgba(255,255,255,0.70)",
+                        border: "1px solid rgba(0,0,0,0.08)",
+                        color: palette.ink,
                       }}
-                      title={focusMedia ? "Show notes" : "Focus media"}
+                      title={isFocused ? "Exit focus" : "Focus"}
                     >
-                      {focusMedia ? <Shrink className="w-4 h-4" /> : <Expand className="w-4 h-4" />}
-                      {focusMedia ? "Notes" : "Focus"}
+                      {isFocused ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+                      <span className="hidden sm:inline">{isFocused ? "Focused" : "Focus"}</span>
                     </button>
 
                     <button
                       onClick={handleDeleteCurrentMedia}
-                      className="pointer-events-auto w-10 h-10 rounded-[8px] flex items-center justify-center"
+                      className="h-11 px-3 rounded-[8px] inline-flex items-center gap-2 text-sm font-semibold"
                       style={{
-                        background: "rgba(255,255,255,0.12)",
-                        border: "1px solid rgba(255,255,255,0.14)",
-                        backdropFilter: "blur(14px)",
-                        color: "#FCA5A5",
+                        background: "rgba(255,255,255,0.70)",
+                        border: "1px solid rgba(220,38,38,0.25)",
+                        color: "#DC2626",
                       }}
                       title="Delete"
                     >
                       <Trash2 className="w-5 h-5" />
+                      <span className="hidden sm:inline">Delete</span>
                     </button>
                   </div>
                 </div>
 
-                {/* Media stage */}
+                {/* Photo stage */}
                 <div
                   ref={stageRef}
-                  className="w-full flex-1 relative flex items-center justify-center px-2 sm:px-6"
+                  className="absolute inset-0 pt-[72px] pb-[24px] flex items-center justify-center"
                   onClick={handleStageClickToAddPin}
                   onPointerMove={onStagePointerMove}
                   onPointerUp={onStagePointerUp}
                   onPointerLeave={onStagePointerUp}
-                  style={{ paddingTop: 70, paddingBottom: focusMedia ? 28 : 260 }}
                 >
-                  <img
-                    src={currentMedia.url}
-                    className={`max-w-full max-h-full object-contain transition-opacity duration-300 ${
-                      isAddPinMode ? "opacity-75" : "opacity-100"
-                    }`}
-                    alt=""
-                    draggable={false}
-                  />
-
-                  {/* Hotspots (new style) */}
-                  {currentHotspots.map((h, idx) => {
-                    const displayX = optimisticPin?.id === h.id ? optimisticPin.x : h.x;
-                    const displayY = optimisticPin?.id === h.id ? optimisticPin.y : h.y;
-
-                    const left = `${clamp01(displayX) * 100}%`;
-                    const top = `${clamp01(displayY) * 100}%`;
-                    const number = idx + 1;
-
-                    const isSelected = selectedHotspotId === h.id;
-
-                    return (
-                      <button
-                        key={h.id}
-                        type="button"
-                        onPointerDown={(e) => {
-                          if (!isAddPinMode) onPinPointerDown(e, h);
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedHotspotId(h.id);
-                        }}
-                        className={`absolute -translate-x-1/2 -translate-y-1/2 select-none touch-none transition-all duration-150 ${
-                          isAddPinMode ? "pointer-events-none opacity-25 scale-75" : "pointer-events-auto"
-                        } ${draggingPinId === h.id ? "scale-125 z-50" : "hover:scale-110"} ${
-                          isSelected ? "z-40" : "z-10"
-                        }`}
-                        style={{
-                          left,
-                          top,
-                          WebkitTouchCallout: "none",
-                          WebkitUserSelect: "none",
-                          userSelect: "none",
-                        }}
-                        aria-label="Pin"
-                      >
-                        <div
-                          className="w-9 h-9 flex items-center justify-center text-xs font-bold"
-                          style={{
-                            borderRadius: 999,
-                            background: isSelected ? palette.sun : "rgba(255,255,255,0.90)",
-                            color: palette.ink,
-                            border: isSelected ? "1px solid rgba(0,0,0,0.18)" : "1px solid rgba(255,255,255,0.25)",
-                            boxShadow: isSelected
-                              ? "0 18px 40px -26px rgba(0,0,0,0.9)"
-                              : "0 14px 30px -22px rgba(0,0,0,0.75)",
-                            backdropFilter: "blur(10px)",
-                            pointerEvents: "none",
-                          }}
-                        >
-                          {number}
-                        </div>
-                      </button>
-                    );
-                  })}
-
-                  {/* “Tap to add” helper */}
-                  {isAddPinMode && (
-                    <div className="absolute top-24 left-1/2 -translate-x-1/2 text-center pointer-events-none z-50 animate-in fade-in slide-in-from-top-2">
-                      <span
-                        className="inline-block text-[10px] font-semibold uppercase tracking-widest px-4 py-2"
-                        style={{
-                          borderRadius: 999,
-                          background: "rgba(255,255,255,0.85)",
-                          border: "1px solid rgba(0,0,0,0.10)",
-                          color: palette.ink,
-                          backdropFilter: "blur(14px)",
-                        }}
-                      >
-                        Tap anywhere to drop a pin
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Bottom overlay controls */}
-                <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
-                  {/* Trash drop zone (only when dragging) */}
                   <div
-                    ref={trashRef}
-                    className={`absolute left-1/2 -translate-x-1/2 transition-all duration-300 pointer-events-auto ${
-                      draggingPinId ? "translate-y-0 opacity-100 scale-100" : "translate-y-10 opacity-0 scale-50"
-                    }`}
-                    style={{ bottom: 84 }}
-                  >
-                    <div
-                      className="w-16 h-16 flex items-center justify-center shadow-2xl transition-all duration-200"
-                      style={{
-                        borderRadius: 999,
-                        background: isHoveringTrash ? "rgba(220,38,38,0.95)" : "rgba(255,255,255,0.12)",
-                        border: isHoveringTrash ? "3px solid rgba(252,165,165,0.9)" : "1px solid rgba(255,255,255,0.14)",
-                        color: isHoveringTrash ? "#fff" : "#FCA5A5",
-                        backdropFilter: "blur(14px)",
-                        transform: isHoveringTrash ? "scale(1.15)" : "scale(1)",
-                      }}
-                    >
-                      <Trash2 className="w-6 h-6" />
-                    </div>
-                  </div>
-
-                  {/* Add pin toggle */}
-                  <button
-                    onClick={() => setIsAddPinMode(!isAddPinMode)}
-                    className={`pointer-events-auto h-12 px-5 inline-flex items-center gap-2 text-xs font-semibold transition-all ${
-                      draggingPinId ? "opacity-0 scale-50 pointer-events-none" : "opacity-100 scale-100"
-                    }`}
+                    className="relative w-full h-full"
                     style={{
-                      borderRadius: 999,
-                      background: isAddPinMode ? "rgba(255,255,255,0.90)" : palette.sun,
-                      color: palette.ink,
-                      border: "1px solid rgba(0,0,0,0.14)",
-                      boxShadow: "0 18px 40px -26px rgba(0,0,0,0.9)",
+                      paddingBottom: isFocused ? 0 : 18,
                     }}
                   >
-                    {isAddPinMode ? (
-                      <>
-                        <X className="w-4 h-4" /> Cancel Pin
-                      </>
-                    ) : (
-                      <>
-                        <MapPin className="w-4 h-4" /> Add Pin
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* Bottom “dashboard” panel */}
-                {!focusMedia && (
-                  <div className="absolute bottom-0 inset-x-0 z-40">
-                    <div
-                      className="mx-auto max-w-6xl px-4 pb-4"
-                      style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
-                    >
+                    {/* image */}
+                    <div className="absolute inset-0 flex items-center justify-center">
                       <div
-                        className="p-4 sm:p-5"
+                        className="relative max-w-[96vw] max-h-[78vh] md:max-h-[86vh]"
                         style={{
-                          borderRadius: 14,
-                          background: "rgba(255,255,255,0.86)",
-                          border: "1px solid rgba(0,0,0,0.12)",
-                          backdropFilter: "blur(18px)",
-                          boxShadow: "0 22px 60px -52px rgba(0,0,0,0.65)",
+                          borderRadius: 12,
+                          overflow: "hidden",
+                          boxShadow: "0 22px 60px -52px rgba(0,0,0,0.45)",
+                          border: "1px solid rgba(0,0,0,0.08)",
+                          background: "rgba(255,255,255,0.45)",
                         }}
                       >
-                        {/* Photo notes */}
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-[10px] font-semibold uppercase tracking-widest text-black/50">
-                              Photo Notes
+                        <img
+                          src={currentMedia.url}
+                          className={`block max-w-full max-h-[86vh] object-contain transition-opacity duration-300 ${
+                            isAddPinMode && !isFocused ? "opacity-70" : "opacity-100"
+                          }`}
+                          alt=""
+                          draggable={false}
+                        />
+                      </div>
+                    </div>
+
+                    {/* pins overlay (hidden when focused) */}
+                    {!isFocused &&
+                      currentHotspots.map((h, idx) => {
+                        const displayX = optimisticPin?.id === h.id ? optimisticPin.x : h.x;
+                        const displayY = optimisticPin?.id === h.id ? optimisticPin.y : h.y;
+
+                        const left = `${clamp01(displayX) * 100}%`;
+                        const top = `${clamp01(displayY) * 100}%`;
+                        const number = idx + 1;
+                        const isSelected = selectedPinId === h.id;
+
+                        return (
+                          <button
+                            key={h.id}
+                            type="button"
+                            onPointerDown={(e) => {
+                              if (!isAddPinMode) onPinPointerDown(e, h);
+                            }}
+                            className={`absolute -translate-x-1/2 -translate-y-1/2 transition-all duration-100 select-none touch-none ${
+                              isAddPinMode ? "pointer-events-none opacity-15 scale-75" : "pointer-events-auto cursor-pointer z-10"
+                            } ${draggingPinId === h.id ? "scale-125 z-50" : "hover:scale-110"}`}
+                            style={{
+                              left,
+                              top,
+                              WebkitTouchCallout: "none",
+                              WebkitUserSelect: "none",
+                              userSelect: "none",
+                            }}
+                            aria-label="Pin"
+                          >
+                            <div
+                              className="w-9 h-9 flex items-center justify-center text-xs font-semibold"
+                              style={{
+                                pointerEvents: "none",
+                                borderRadius: 999,
+                                background: isSelected ? palette.sun : "rgba(255,255,255,0.92)",
+                                color: palette.ink,
+                                border: isSelected ? "1px solid rgba(0,0,0,0.18)" : "1px solid rgba(0,0,0,0.10)",
+                                boxShadow: "0 10px 25px -18px rgba(0,0,0,0.45)",
+                              }}
+                            >
+                              {number}
                             </div>
-                            <div className="mt-1 text-sm text-black/80 leading-relaxed">
-                              {currentMedia.note?.trim()
-                                ? currentMedia.note
-                                : "No photo notes yet. (Optional: add a `note` field on media.)"}
-                            </div>
+                          </button>
+                        );
+                      })}
+
+                    {/* trash drop zone (only while dragging) */}
+                    {!isFocused && (
+                      <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+                        <div
+                          ref={trashRef}
+                          className={`transition-all duration-300 pointer-events-auto ${
+                            draggingPinId ? "translate-y-0 opacity-100 scale-100" : "translate-y-10 opacity-0 scale-50"
+                          }`}
+                        >
+                          <div
+                            className="w-16 h-16 flex items-center justify-center"
+                            style={{
+                              borderRadius: 999,
+                              background: isHoveringTrash ? "#DC2626" : "rgba(255,255,255,0.78)",
+                              color: isHoveringTrash ? "#fff" : "#DC2626",
+                              border: "1px solid rgba(0,0,0,0.10)",
+                              boxShadow: "0 18px 50px -40px rgba(0,0,0,0.55)",
+                              backdropFilter: "blur(14px)",
+                              transform: isHoveringTrash ? "scale(1.15)" : "scale(1)",
+                              transition: "all 140ms ease",
+                            }}
+                          >
+                            <Trash2 className="w-6 h-6" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Add pin helper text */}
+                    {!isFocused && isAddPinMode && (
+                      <div className="absolute top-24 left-1/2 -translate-x-1/2 text-center pointer-events-none z-50 animate-in fade-in slide-in-from-top-2">
+                        <span
+                          className="inline-block text-[10px] font-semibold uppercase tracking-widest px-4 py-2"
+                          style={{
+                            borderRadius: 999,
+                            background: "rgba(255,255,255,0.85)",
+                            border: "1px solid rgba(0,0,0,0.08)",
+                            backdropFilter: "blur(12px)",
+                          }}
+                        >
+                          Tap anywhere to drop a pin
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bottom sheet: notes + pins (draggable) */}
+                <div
+                  className="absolute inset-x-0 bottom-0 z-60"
+                  style={{
+                    transform: `translateY(${sheetY}px)`,
+                    transition: sheetDragRef.current.dragging ? "none" : "transform 220ms ease",
+                  }}
+                >
+                  {/* “peek” bar area */}
+                  <div
+                    onPointerDown={onSheetPointerDown}
+                    onPointerMove={onSheetPointerMove}
+                    onPointerUp={onSheetPointerUp}
+                    onPointerCancel={onSheetPointerUp}
+                    className="w-full"
+                    style={{
+                      paddingTop: 10,
+                      paddingBottom: 10,
+                      background: "rgba(255,255,255,0.62)",
+                      borderTop: "1px solid rgba(0,0,0,0.10)",
+                      backdropFilter: "blur(18px)",
+                    }}
+                  >
+                    <div className="mx-auto w-12 h-[4px]" style={{ borderRadius: 999, background: "rgba(0,0,0,0.18)" }} />
+                  </div>
+
+                  {/* Sheet content */}
+                  <div
+                    className="px-4 pb-5"
+                    style={{
+                      background: "rgba(255,255,255,0.62)",
+                      backdropFilter: "blur(18px)",
+                      borderTop: "1px solid rgba(0,0,0,0.08)",
+                      boxShadow: "0 -22px 60px -52px rgba(0,0,0,0.35)",
+                    }}
+                  >
+                    {/* When focused, we only show the peek area; content stays hidden */}
+                    {isFocused ? (
+                      <div style={{ height: SHEET_PEEK }} />
+                    ) : (
+                      <>
+                        {/* NOTES HEADER + ACTIONS */}
+                        <div className="pt-3 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <StickyNote className="w-4 h-4 text-black/60" />
+                            <div className="text-[11px] font-semibold uppercase tracking-widest text-black/50">Notes</div>
                           </div>
 
-                          <div className="shrink-0 flex items-center gap-2">
+                          <div className="flex items-center gap-2">
+                            {/* Add Pin moved next to Notes. Hidden while focused (handled above), also hide while add-pin mode active? keep visible. */}
                             <button
-                              onClick={goPrevPin}
-                              disabled={!currentHotspots.length}
-                              className="h-10 px-3 rounded-[8px] text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-40"
-                              style={{
-                                background: "rgba(0,0,0,0.06)",
-                                border: "1px solid rgba(0,0,0,0.10)",
+                              onClick={() => {
+                                setIsAddPinMode((v) => !v);
                               }}
+                              className="h-9 px-3 rounded-[8px] inline-flex items-center gap-2 text-[12px] font-semibold"
+                              style={{
+                                background: isAddPinMode ? palette.sun : "rgba(255,255,255,0.72)",
+                                border: "1px solid rgba(0,0,0,0.10)",
+                                color: palette.ink,
+                              }}
+                              title={isAddPinMode ? "Cancel add pin" : "Add pin"}
                             >
-                              <ChevronLeft className="w-4 h-4" /> Prev
+                              {isAddPinMode ? <X className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
+                              <span>{isAddPinMode ? "Cancel" : "Add pin"}</span>
                             </button>
+
+                            {/* note edit/add */}
                             <button
-                              onClick={goNextPin}
-                              disabled={!currentHotspots.length}
-                              className="h-10 px-3 rounded-[8px] text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-40"
+                              onClick={() => setIsEditingNote((v) => !v)}
+                              className="h-9 w-9 rounded-[8px] inline-flex items-center justify-center"
                               style={{
-                                background: palette.sky,
+                                background: "rgba(255,255,255,0.72)",
                                 border: "1px solid rgba(0,0,0,0.10)",
-                                color: "#fff",
+                                color: palette.ink,
                               }}
+                              title={currentMedia.note ? "Edit note" : "Add note"}
                             >
-                              Next <ChevronRight className="w-4 h-4" />
+                              {currentMedia.note ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                             </button>
                           </div>
                         </div>
 
-                        {/* Divider */}
-                        <div className="my-4" style={{ height: 1, background: "rgba(0,0,0,0.10)" }} />
-
-                        {/* Pin notes */}
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1">
-                            <div className="text-[10px] font-semibold uppercase tracking-widest text-black/50">
-                              Pin Notes
+                        {/* NOTES BODY */}
+                        <div className="mt-2">
+                          {isEditingNote ? (
+                            <div className="space-y-2">
+                              <textarea
+                                rows={3}
+                                value={noteDraft}
+                                onChange={(e) => setNoteDraft(e.target.value)}
+                                className="w-full px-3 py-2 text-sm outline-none resize-none"
+                                style={{
+                                  background: "rgba(255,255,255,0.78)",
+                                  border: "1px solid rgba(0,0,0,0.10)",
+                                  borderRadius: 8,
+                                }}
+                                placeholder="Add a quick note about this photo…"
+                              />
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  onClick={() => {
+                                    setIsEditingNote(false);
+                                    setNoteDraft(currentMedia.note || "");
+                                  }}
+                                  className="h-9 px-3 rounded-[8px] text-[12px] font-semibold"
+                                  style={{
+                                    background: "rgba(255,255,255,0.72)",
+                                    border: "1px solid rgba(0,0,0,0.10)",
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={saveNote}
+                                  className="h-9 px-3 rounded-[8px] text-[12px] font-semibold"
+                                  style={{
+                                    background: palette.sky,
+                                    color: "#fff",
+                                    border: "1px solid rgba(0,0,0,0.10)",
+                                  }}
+                                >
+                                  Save
+                                </button>
+                              </div>
+                              <div className="text-[10px] text-black/40">
+                                TODO: wire this to Firestore by adding `updateMediaNote(...)` in VaultContext.
+                              </div>
                             </div>
+                          ) : currentMedia.note ? (
+                            <div
+                              className="px-3 py-2 text-sm"
+                              style={{
+                                background: "rgba(255,255,255,0.72)",
+                                border: "1px solid rgba(0,0,0,0.10)",
+                                borderRadius: 8,
+                              }}
+                            >
+                              {currentMedia.note}
+                            </div>
+                          ) : (
+                            <div
+                              className="px-3 py-2 text-sm text-black/45"
+                              style={{
+                                background: "rgba(255,255,255,0.62)",
+                                border: "1px dashed rgba(0,0,0,0.18)",
+                                borderRadius: 8,
+                              }}
+                            >
+                              No notes yet.
+                            </div>
+                          )}
+                        </div>
 
-                            {selectedHotspot ? (
-                              <div className="mt-1">
-                                <div className="text-sm font-semibold" style={{ fontFamily: headerFont }}>
-                                  {selectedHotspot.label?.trim() ? selectedHotspot.label : "Untitled pin"}
-                                </div>
-                                <div className="mt-1 text-sm text-black/75 leading-relaxed">
-                                  {selectedHotspot.note?.trim() ? selectedHotspot.note : "No pin note yet."}
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="mt-1 text-sm text-black/60">
-                                No pin selected.
-                              </div>
-                            )}
+                        {/* PIN NOTES */}
+                        <div className="mt-4 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-4 h-4 text-black/60" />
+                            <div className="text-[11px] font-semibold uppercase tracking-widest text-black/50">Pins</div>
+                            <div className="text-[11px] font-semibold text-black/35">
+                              {currentHotspots.length ? `${currentHotspots.length}` : "0"}
+                            </div>
                           </div>
 
                           <button
-                            onClick={() => {
-                              if (!selectedHotspot || !currentMedia) return;
-                              openPinEditor(currentMedia.sessionId, currentMedia.id, selectedHotspot);
-                            }}
-                            disabled={!selectedHotspot}
-                            className="h-10 px-3 rounded-[8px] text-xs font-semibold inline-flex items-center gap-2 disabled:opacity-40"
+                            onClick={goNextPin}
+                            disabled={!currentHotspots.length}
+                            className="h-9 px-3 rounded-[8px] inline-flex items-center gap-2 text-[12px] font-semibold disabled:opacity-50"
                             style={{
-                              background: palette.sun,
+                              background: "rgba(255,255,255,0.72)",
                               border: "1px solid rgba(0,0,0,0.10)",
                               color: palette.ink,
                             }}
                           >
-                            <Pencil className="w-4 h-4" /> Edit Pin
+                            Next pin <ChevronRight className="w-4 h-4" />
                           </button>
                         </div>
 
-                        {/* Pin chips */}
+                        <div className="mt-2">
+                          {selectedPin ? (
+                            <div
+                              className="p-3"
+                              style={{
+                                background: "rgba(255,255,255,0.72)",
+                                border: "1px solid rgba(0,0,0,0.10)",
+                                borderRadius: 8,
+                              }}
+                            >
+                              <div className="text-[12px] font-semibold" style={{ fontFamily: headerFont }}>
+                                {selectedPin.label?.trim() ? selectedPin.label : "Untitled pin"}
+                              </div>
+                              <div className="mt-1 text-sm text-black/70">
+                                {selectedPin.note?.trim() ? selectedPin.note : "No pin note yet."}
+                              </div>
+
+                              {/* Optional: quick delete pin */}
+                              <div className="mt-3 flex justify-end">
+                                <button
+                                  onClick={async () => {
+                                    if (!confirm("Delete this pin?")) return;
+                                    await deleteHotspotFromMedia(activeProject.id, currentMedia.sessionId, currentMedia.id, selectedPin.id);
+                                  }}
+                                  className="h-9 px-3 rounded-[8px] inline-flex items-center gap-2 text-[12px] font-semibold"
+                                  style={{
+                                    background: "rgba(255,255,255,0.72)",
+                                    border: "1px solid rgba(220,38,38,0.25)",
+                                    color: "#DC2626",
+                                  }}
+                                >
+                                  <Trash2 className="w-4 h-4" /> Delete pin
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              className="p-3 text-sm text-black/45"
+                              style={{
+                                background: "rgba(255,255,255,0.62)",
+                                border: "1px dashed rgba(0,0,0,0.18)",
+                                borderRadius: 8,
+                              }}
+                            >
+                              Tap a pin to see its note.
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Pin “selector row” — small chips for quick jumping */}
                         {currentHotspots.length > 0 && (
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            {currentHotspots.map((h, idx) => {
-                              const active = h.id === selectedHotspotId;
+                          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                            {currentHotspots.map((h, i) => {
+                              const active = h.id === selectedPinId;
                               return (
                                 <button
                                   key={h.id}
-                                  onClick={() => setSelectedHotspotId(h.id)}
-                                  className="px-3 h-9 text-xs font-semibold"
+                                  onClick={() => setSelectedPinId(h.id)}
+                                  className="shrink-0 h-9 px-3 rounded-[8px] text-[12px] font-semibold"
                                   style={{
-                                    borderRadius: 999,
-                                    background: active ? palette.sun : "rgba(0,0,0,0.06)",
+                                    background: active ? palette.sun : "rgba(255,255,255,0.72)",
                                     border: "1px solid rgba(0,0,0,0.10)",
                                     color: palette.ink,
                                   }}
                                 >
-                                  #{idx + 1}
+                                  {i + 1}
                                 </button>
                               );
                             })}
                           </div>
                         )}
-                      </div>
-                    </div>
+                      </>
+                    )}
                   </div>
-                )}
+
+                  {/* When focused, leave just a visible lip so user can pull up */}
+                  {isFocused && (
+                    <div
+                      className="absolute inset-x-0 bottom-0"
+                      style={{
+                        height: SHEET_PEEK,
+                        background: "rgba(255,255,255,0.62)",
+                        borderTop: "1px solid rgba(0,0,0,0.08)",
+                        backdropFilter: "blur(18px)",
+                      }}
+                    />
+                  )}
+                </div>
               </div>
             )}
 
@@ -1026,98 +1133,6 @@ function VaultShell() {
               mode="upload"
               existingSessions={activeProject?.sessions || []}
             />
-
-            {/* PIN EDITOR (kept, but matches your 8px rule) */}
-            {pinOpen && (
-              <div className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-150">
-                <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setPinOpen(false)} />
-                <div
-                  className="relative w-full max-w-lg bg-white overflow-hidden"
-                  style={{
-                    borderRadius: 14,
-                    border: "1px solid rgba(0,0,0,0.08)",
-                    boxShadow: "0 22px 60px -52px rgba(0,0,0,0.45)",
-                  }}
-                >
-                  <div className="px-5 py-4 flex justify-between items-center" style={{ borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                    <div className="flex items-center gap-2">
-                      <Pencil className="w-4 h-4" />
-                      <h3 className="text-sm font-semibold tracking-tight" style={{ fontFamily: headerFont }}>
-                        Edit Pin
-                      </h3>
-                    </div>
-                    <button
-                      onClick={() => setPinOpen(false)}
-                      className="p-2 rounded-[8px]"
-                      style={{ background: "rgba(255,255,255,0.55)", border: "1px solid rgba(0,0,0,0.08)" }}
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  <div className="p-5 space-y-4">
-                    <div>
-                      <label className="block text-[10px] font-semibold uppercase tracking-widest text-black/45 mb-2">
-                        Label (optional)
-                      </label>
-                      <input
-                        value={pinDraft.label}
-                        onChange={(e) => setPinDraft((p) => ({ ...p, label: e.target.value }))}
-                        className="w-full px-4 py-3 text-sm outline-none"
-                        style={{
-                          background: "rgba(255,255,255,0.60)",
-                          border: "1px solid rgba(0,0,0,0.10)",
-                          borderRadius: 8,
-                        }}
-                        placeholder="e.g. Waistline"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold uppercase tracking-widest text-black/45 mb-2">
-                        Note
-                      </label>
-                      <textarea
-                        rows={4}
-                        value={pinDraft.note}
-                        onChange={(e) => setPinDraft((p) => ({ ...p, note: e.target.value }))}
-                        className="w-full px-4 py-3 text-sm outline-none resize-none"
-                        style={{
-                          background: "rgba(255,255,255,0.60)",
-                          border: "1px solid rgba(0,0,0,0.10)",
-                          borderRadius: 8,
-                        }}
-                        placeholder="What needs to change here?"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="p-5 flex gap-3" style={{ borderTop: "1px solid rgba(0,0,0,0.08)", background: "rgba(255,255,255,0.55)" }}>
-                    <button
-                      onClick={deletePin}
-                      className="flex-1 py-3 rounded-[8px] font-semibold text-sm"
-                      style={{
-                        background: "rgba(255,255,255,0.72)",
-                        border: "1px solid rgba(220,38,38,0.20)",
-                        color: "#DC2626",
-                      }}
-                    >
-                      Delete
-                    </button>
-                    <button
-                      onClick={savePinEdits}
-                      className="flex-[2] py-3 rounded-[8px] font-semibold text-sm"
-                      style={{
-                        background: palette.sun,
-                        color: palette.ink,
-                        border: "1px solid rgba(0,0,0,0.10)",
-                      }}
-                    >
-                      Save
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
