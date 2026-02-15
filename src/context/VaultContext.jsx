@@ -34,7 +34,7 @@ export function VaultProvider({ children }) {
 
   const [projects, setProjects] = useState([]);
 
-  // Auth Bouncer
+  // Auth
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u || null);
@@ -43,19 +43,28 @@ export function VaultProvider({ children }) {
     return () => unsub();
   }, []);
 
+  // Projects feed (scoped to user)
   useEffect(() => {
     if (!user) {
       setProjects([]);
       return;
     }
+
+    // IMPORTANT: this assumes your project docs have createdBy === user.uid
+    // If you want shared projects later, you’ll change this query.
     const qy = query(collection(db, "projects"), orderBy("createdAt", "desc"));
+
     const unsub = onSnapshot(qy, (snapshot) => {
-      const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const list = snapshot.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((p) => p.createdBy === user.uid);
       setProjects(list);
     });
+
     return () => unsub();
   }, [user]);
 
+  // Keep activeProject in sync with snapshot updates
   useEffect(() => {
     if (!activeProject?.id) return;
     const updated = projects.find((p) => p.id === activeProject.id);
@@ -64,6 +73,7 @@ export function VaultProvider({ children }) {
 
   const addProject = async ({ title, aiTags = [], note = "" }) => {
     if (!user) return null;
+
     const newProject = {
       title: title || "Untitled Project",
       aiTags,
@@ -73,8 +83,9 @@ export function VaultProvider({ children }) {
       createdBy: user.uid,
       sessions: [],
       expiresIn: "30 Days",
-      coverPhoto: "", 
+      coverPhoto: "",
     };
+
     const docRef = await addDoc(collection(db, "projects"), newProject);
     return { id: docRef.id, ...newProject };
   };
@@ -82,8 +93,10 @@ export function VaultProvider({ children }) {
   const deleteProject = async (projectId) => {
     if (!user || !projectId) return;
     await deleteDoc(doc(db, "projects", projectId));
+
     if (activeProject?.id === projectId) {
       setActiveProject(null);
+      setActiveMedia(null);
       setView("dashboard");
     }
   };
@@ -131,31 +144,37 @@ export function VaultProvider({ children }) {
       sessions = [newSession, ...sessions];
     }
 
+    // Cover behavior:
+    // - Prefer latest photo
+    // - If there is no cover yet, allow video to set it
     let coverPhoto = data.coverPhoto || "";
     if (!isVideo) coverPhoto = url;
     if (isVideo && !coverPhoto) coverPhoto = url;
 
     await updateDoc(projectRef, { sessions, coverPhoto });
 
+    // Local sync (helps UI feel instant)
     if (activeProject?.id === projectId) {
       setActiveProject((p) => (p ? { ...p, sessions, coverPhoto } : p));
     }
   };
 
-  // --- DELETE MEDIA (The photo executioner) ---
+  // Delete media
   const deleteMediaFromProject = async (projectId, sessionId, mediaId) => {
-    if (!user || !projectId) return;
+    if (!user || !projectId || !sessionId || !mediaId) return;
+
     const projectRef = doc(db, "projects", projectId);
     const snap = await getDoc(projectRef);
     if (!snap.exists()) return;
 
     const data = snap.data();
-    const sessions = (data.sessions || []).map((session) => {
+    let sessions = safeArray(data.sessions).map((session) => {
       if (session.id !== sessionId) return session;
-      const media = (session.media || []).filter((m) => m.id !== mediaId);
+      const media = safeArray(session.media).filter((m) => m.id !== mediaId);
       return { ...session, media };
     });
 
+    // Optional: if a session becomes empty, keep it (you can choose to remove it later)
     await updateDoc(projectRef, { sessions });
 
     if (activeProject?.id === projectId) {
@@ -163,77 +182,101 @@ export function VaultProvider({ children }) {
     }
   };
 
-  // --- THE HOLY TRINITY OF PINS ---
+  // Pins: add
   const addHotspotToMedia = async (projectId, sessionId, mediaId, hotspotData) => {
-    if (!user || !projectId) return;
+    if (!user || !projectId || !sessionId || !mediaId) return;
+
     const projectRef = doc(db, "projects", projectId);
     const snap = await getDoc(projectRef);
     if (!snap.exists()) return;
 
     const data = snap.data();
-    const sessions = (data.sessions || []).map((session) => {
+
+    const sessions = safeArray(data.sessions).map((session) => {
       if (session.id !== sessionId) return session;
-      const media = (session.media || []).map((m) => {
+
+      const media = safeArray(session.media).map((m) => {
         if (m.id !== mediaId) return m;
-        const hotspots = Array.isArray(m.hotspots) ? m.hotspots : [];
+        const hotspots = safeArray(m.hotspots);
+
+        const id = hotspotData?.id || `h-${Date.now()}`;
+        // Ensure id doesn't get overwritten by ...hotspotData
+        const { id: _ignored, ...rest } = hotspotData || {};
+
         return {
           ...m,
-          hotspots: [...hotspots, { id: hotspotData.id || `h-${Date.now()}`, ...hotspotData }],
+          hotspots: [...hotspots, { id, ...rest }],
         };
       });
+
       return { ...session, media };
     });
 
     await updateDoc(projectRef, { sessions });
+
     if (activeProject?.id === projectId) {
       setActiveProject((p) => (p ? { ...p, sessions } : p));
     }
   };
 
+  // Pins: update
   const updateHotspotInMedia = async (projectId, sessionId, mediaId, hotspotId, updates) => {
-    if (!user || !projectId) return;
+    if (!user || !projectId || !sessionId || !mediaId || !hotspotId) return;
+
     const projectRef = doc(db, "projects", projectId);
     const snap = await getDoc(projectRef);
     if (!snap.exists()) return;
 
     const data = snap.data();
-    const sessions = (data.sessions || []).map((session) => {
+
+    const sessions = safeArray(data.sessions).map((session) => {
       if (session.id !== sessionId) return session;
-      const media = (session.media || []).map((m) => {
+
+      const media = safeArray(session.media).map((m) => {
         if (m.id !== mediaId) return m;
-        const hotspots = (m.hotspots || []).map((h) => {
+
+        const hotspots = safeArray(m.hotspots).map((h) => {
           if (h.id !== hotspotId) return h;
-          return { ...h, ...updates };
+          return { ...h, ...(updates || {}) };
         });
+
         return { ...m, hotspots };
       });
+
       return { ...session, media };
     });
 
     await updateDoc(projectRef, { sessions });
+
     if (activeProject?.id === projectId) {
       setActiveProject((p) => (p ? { ...p, sessions } : p));
     }
   };
 
+  // Pins: delete
   const deleteHotspotFromMedia = async (projectId, sessionId, mediaId, hotspotId) => {
-    if (!user || !projectId) return;
+    if (!user || !projectId || !sessionId || !mediaId || !hotspotId) return;
+
     const projectRef = doc(db, "projects", projectId);
     const snap = await getDoc(projectRef);
     if (!snap.exists()) return;
 
     const data = snap.data();
-    const sessions = (data.sessions || []).map((session) => {
+
+    const sessions = safeArray(data.sessions).map((session) => {
       if (session.id !== sessionId) return session;
-      const media = (session.media || []).map((m) => {
+
+      const media = safeArray(session.media).map((m) => {
         if (m.id !== mediaId) return m;
-        const hotspots = (m.hotspots || []).filter((h) => h.id !== hotspotId);
+        const hotspots = safeArray(m.hotspots).filter((h) => h.id !== hotspotId);
         return { ...m, hotspots };
       });
+
       return { ...session, media };
     });
 
     await updateDoc(projectRef, { sessions });
+
     if (activeProject?.id === projectId) {
       setActiveProject((p) => (p ? { ...p, sessions } : p));
     }
@@ -255,22 +298,32 @@ export function VaultProvider({ children }) {
           safeArray(p.aiTags).some((t) => (t || "").toLowerCase().includes(q))
       );
     }
+
     return list;
   }, [projects, tab, search]);
 
   const value = {
     user,
     authReady,
-    view, setView,
-    tab, setTab,
-    activeProject, setActiveProject,
-    activeMedia, setActiveMedia,
-    search, setSearch,
+
+    view,
+    setView,
+    tab,
+    setTab,
+    activeProject,
+    setActiveProject,
+    activeMedia,
+    setActiveMedia,
+    search,
+    setSearch,
+
     filteredProjects,
+
     addProject,
     deleteProject,
     addMediaToProject,
     deleteMediaFromProject,
+
     addHotspotToMedia,
     updateHotspotInMedia,
     deleteHotspotFromMedia,
@@ -279,5 +332,4 @@ export function VaultProvider({ children }) {
   return <VaultContext.Provider value={value}>{children}</VaultContext.Provider>;
 }
 
-// THIS IS THE LINE YOU KILLED. IT IS NOW SAFE.
 export const useVault = () => useContext(VaultContext);

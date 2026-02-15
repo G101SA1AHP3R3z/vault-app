@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, Play, MapPin } from "lucide-react";
 
 export default function MediaCard({ item, onClick, onDelete }) {
   const src = useMemo(() => {
@@ -9,53 +9,125 @@ export default function MediaCard({ item, onClick, onDelete }) {
     return "";
   }, [item]);
 
-  const isVideo = item?.type === "video" || item?.kind === "video" || item?.mediaType === "video";
+  const isVideo =
+    item?.type === "video" || item?.kind === "video" || item?.mediaType === "video";
+
   const hotspotsCount = Array.isArray(item?.hotspots) ? item.hotspots.length : 0;
 
+  // Index palette (match app/login vibe)
+  const palette = {
+    ink: "#0B0B0C",
+    paper: "#FFFEFA",
+    line: "rgba(0,0,0,0.08)",
+    sky: "#3AA8FF",
+    sun: "#FFEA3A",
+    breeze: "#54E6C1",
+  };
+
   return (
-    <div 
+    <div
       onClick={onClick}
-      className="aspect-square bg-gray-200 rounded-xl overflow-hidden relative cursor-pointer active:scale-95 transition-all shadow-sm border border-gray-100 group"
+      className="aspect-square overflow-hidden relative cursor-pointer active:scale-[0.98] transition-transform group"
+      style={{
+        borderRadius: 12,
+        background: "rgba(255,255,255,0.62)",
+        border: `1px solid ${palette.line}`,
+        backdropFilter: "blur(14px)",
+        boxShadow: "0 18px 45px -38px rgba(0,0,0,0.35)",
+      }}
     >
       {src ? (
-        <img
-          src={src}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-          alt="Media"
-          loading="lazy"
-        />
+        <>
+          <img
+            src={src}
+            className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
+            alt="Media"
+            loading="lazy"
+          />
+
+          {/* subtle unifying overlay (sun/sky) */}
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background:
+                "linear-gradient(135deg, rgba(58,168,255,0.12) 0%, rgba(255,234,58,0.08) 52%, rgba(255,255,255,0.06) 100%)",
+              mixBlendMode: "screen",
+            }}
+          />
+          <div className="absolute inset-0 bg-white/5 pointer-events-none" />
+        </>
       ) : (
-        <div className="w-full h-full flex items-center justify-center text-gray-400 text-[10px] font-bold uppercase tracking-widest">
+        <div className="w-full h-full flex items-center justify-center text-black/40 text-[10px] font-semibold uppercase tracking-widest">
           No cover
         </div>
       )}
 
+      {/* Video chip */}
       {isVideo && (
-        <div className="absolute bottom-1 left-1 text-white text-[9px] font-black uppercase tracking-wider z-10 bg-black/60 backdrop-blur-md px-1.5 py-0.5 rounded">
-          VIDEO
+        <div
+          className="absolute bottom-2 left-2 inline-flex items-center gap-1 px-2 py-1"
+          style={{
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.55)",
+            border: `1px solid ${palette.line}`,
+            backdropFilter: "blur(14px)",
+            color: "rgba(0,0,0,0.70)",
+          }}
+        >
+          <Play className="w-3 h-3" />
+          <span className="text-[10px] font-semibold uppercase tracking-wide">Video</span>
         </div>
       )}
 
+      {/* Hotspots chip */}
       {item?.type === "photo" && hotspotsCount > 0 && (
-        <div className="absolute top-1 left-1 flex items-center justify-center w-5 h-5 bg-black/70 backdrop-blur-md rounded-full border border-white/20">
-          <span className="text-white text-[9px] font-black">{hotspotsCount}</span>
+        <div
+          className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-1"
+          style={{
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.55)",
+            border: `1px solid ${palette.line}`,
+            backdropFilter: "blur(14px)",
+            color: "rgba(0,0,0,0.70)",
+          }}
+          title={`${hotspotsCount} pin(s)`}
+        >
+          <MapPin className="w-3 h-3" />
+          <span className="text-[10px] font-semibold">{hotspotsCount}</span>
         </div>
       )}
 
-      {/* The Execution Button */}
+      {/* Delete (radius <= 8px) */}
       {onDelete && (
         <button
           onClick={(e) => {
-            e.stopPropagation(); // Prevents the photo from opening
-            if (confirm("Permanently delete this photo?")) {
-              onDelete(item);
-            }
+            e.stopPropagation();
+            if (confirm("Permanently delete this photo?")) onDelete(item);
           }}
-          className="absolute top-1 right-1 w-6 h-6 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center text-white/70 hover:bg-red-500 hover:text-white transition-all z-20"
+          className="absolute top-2 right-2 w-8 h-8 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+          style={{
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.55)",
+            border: `1px solid ${palette.line}`,
+            backdropFilter: "blur(14px)",
+            color: "rgba(0,0,0,0.60)",
+          }}
+          aria-label="Delete media"
+          title="Delete"
         >
-          <Trash2 className="w-3 h-3" />
+          <Trash2 className="w-4 h-4" />
         </button>
       )}
+
+      {/* Hover accent hairline (subtle, sunny) */}
+      <div
+        className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{
+          borderRadius: 12,
+          boxShadow:
+            "inset 0 0 0 1px rgba(255,234,58,0.20), inset 0 0 0 2px rgba(58,168,255,0.10)",
+        }}
+      />
     </div>
   );
 }
