@@ -10,7 +10,7 @@ const firebaseConfig = {
   authDomain: "the-vault-7d9fe.firebaseapp.com",
   projectId: "the-vault-7d9fe",
   // ✅ IMPORTANT: use bucket name WITHOUT gs://
-  storageBucket: "gs://the-vault-7d9fe.firebasestorage.app",
+  storageBucket: "the-vault-7d9fe.firebasestorage.app",
   messagingSenderId: "88313488276",
   appId: "1:88313488276:web:3afb61f8c62bec09ece581",
   measurementId: "G-87Q0GM1EW8",
