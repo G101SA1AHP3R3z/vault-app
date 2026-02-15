@@ -1,3 +1,18 @@
 @import "tailwindcss";
 
 /* your custom CSS below if any */
+/* Prevent iOS Safari auto-zoom on form fields */
+input, textarea, select {
+  font-size: 16px;
+}
+
+/* Optional: allow smaller text on larger screens */
+@media (min-width: 640px) {
+  input, textarea, select {
+    font-size: 14px;
+  }
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
