@@ -19,7 +19,7 @@ import MediaCard from "./components/MediaCard";
 import NewProjectModal from "./components/NewProjectModal";
 import AddMediaModal from "./components/AddMediaModal";
 import LibraryGrid from "./features/library/LibraryGrid";
-import Login from "./components/Login"; 
+import Login from "./components/Login";
 
 function clamp01(n) {
   const x = Number(n);
@@ -43,20 +43,12 @@ function AuthGate({ children }) {
 
 function VaultShell() {
   const {
-    view,
-    setView,
-    tab,
-    setTab,
-    activeProject,
-    setActiveProject,
-    activeMedia,
-    setActiveMedia,
-    addProject,
-    addMediaToProject,
-    deleteProject,
-    addHotspotToMedia,
-    updateHotspotInMedia,
-    deleteHotspotFromMedia,
+    view, setView,
+    tab, setTab,
+    activeProject, setActiveProject,
+    activeMedia, setActiveMedia,
+    addProject, addMediaToProject, deleteProject,
+    addHotspotToMedia, updateHotspotInMedia, deleteHotspotFromMedia,
   } = useVault();
 
   const [newOpen, setNewOpen] = useState(false);
@@ -66,10 +58,23 @@ function VaultShell() {
   const [isAddPinMode, setIsAddPinMode] = useState(false);
   const [pinOpen, setPinOpen] = useState(false);
   const [pinDraft, setPinDraft] = useState({ label: "", note: "" });
-  const [pinTarget, setPinTarget] = useState(null); 
+  const [pinTarget, setPinTarget] = useState(null);
 
-  const dragRef = useRef({ dragging: false, hotspotId: null, startX: 0, startY: 0 });
+  // --- DRAG & TRASH LOGIC ---
+  const [draggingPinId, setDraggingPinId] = useState(null);
+  const [optimisticPin, setOptimisticPin] = useState(null);
+  const [isHoveringTrash, setIsHoveringTrash] = useState(false);
+
+  const dragRef = useRef({
+    dragging: false,
+    hotspotId: null,
+    startX: 0,
+    startY: 0,
+    timer: null,
+  });
+
   const stageRef = useRef(null);
+  const trashRef = useRef(null); // Reference to our new trash drop-zone
 
   const navigateToMedia = (m, sessionId) => {
     setActiveMedia({ ...m, sessionId });
@@ -80,7 +85,7 @@ function VaultShell() {
     if (view === "media") {
       setView("project");
       setActiveMedia(null);
-      setIsAddPinMode(false); // Reset mode when leaving
+      setIsAddPinMode(false);
     } else {
       setView("dashboard");
       setActiveProject(null);
@@ -127,7 +132,7 @@ function VaultShell() {
   const currentHotspots = currentMedia?.hotspots || [];
 
   const handleStageClickToAddPin = async (e) => {
-    if (!isAddPinMode) return; // Strict bouncer check. No button clicked = no pin dropped.
+    if (!isAddPinMode) return;
 
     try {
       if (!activeProject || !currentMedia) return;
@@ -140,16 +145,16 @@ function VaultShell() {
 
       const x = clamp01((clientX - rect.left) / rect.width);
       const y = clamp01((clientY - rect.top) / rect.height);
+      const newPinId = `h-${Date.now()}`;
 
       await addHotspotToMedia(activeProject.id, currentMedia.sessionId, currentMedia.id, {
-        x,
-        y,
-        label: "",
-        note: "",
+        id: newPinId,
+        x, y, label: "", note: "",
       });
 
-      // Turn off mode automatically so they don't accidentally drop more
       setIsAddPinMode(false);
+      openPinEditor(currentMedia.sessionId, currentMedia.id, { id: newPinId, label: "", note: "" });
+
     } catch (err) {
       console.error("Failed to save pin:", err);
       alert("Failed to save pin. Check console.");
@@ -196,45 +201,122 @@ function VaultShell() {
     }
   };
 
-  const onPinPointerDown = (e, hotspotId) => {
+  // --- REWRITTEN DRAG/TAP WITH TRASH CHUTE ---
+  const onPinPointerDown = (e, hotspot) => {
     e.preventDefault();
     e.stopPropagation();
-    dragRef.current.dragging = true;
-    dragRef.current.hotspotId = hotspotId;
+
+    dragRef.current.hotspotId = hotspot.id;
     dragRef.current.startX = e.clientX;
     dragRef.current.startY = e.clientY;
+    dragRef.current.dragging = false;
+
     try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch {}
+
+    dragRef.current.timer = setTimeout(() => {
+      dragRef.current.dragging = true;
+      setDraggingPinId(hotspot.id);
+      setOptimisticPin({ id: hotspot.id, x: hotspot.x, y: hotspot.y });
+    }, 1500);
   };
 
-  const onStagePointerMove = async (e) => {
-    if (!dragRef.current.dragging) return;
+  const onStagePointerMove = (e) => {
+    if (!dragRef.current.hotspotId) return;
+
+    if (!dragRef.current.dragging) {
+      const dx = Math.abs(e.clientX - dragRef.current.startX);
+      const dy = Math.abs(e.clientY - dragRef.current.startY);
+      if (dx > 10 || dy > 10) {
+        clearTimeout(dragRef.current.timer);
+        dragRef.current.timer = null;
+        dragRef.current.hotspotId = null;
+      }
+      return;
+    }
+
+    if (stageRef.current) {
+      const rect = stageRef.current.getBoundingClientRect();
+      const clientX = e.clientX ?? (e.touches?.[0]?.clientX);
+      const clientY = e.clientY ?? (e.touches?.[0]?.clientY);
+      
+      const x = clamp01((clientX - rect.left) / rect.width);
+      const y = clamp01((clientY - rect.top) / rect.height);
+      setOptimisticPin({ id: dragRef.current.hotspotId, x, y });
+
+      // Hitbox logic for the trash can
+      if (trashRef.current) {
+        const tRect = trashRef.current.getBoundingClientRect();
+        const hovering =
+          clientX >= tRect.left &&
+          clientX <= tRect.right &&
+          clientY >= tRect.top &&
+          clientY <= tRect.bottom;
+        
+        if (hovering !== isHoveringTrash) setIsHoveringTrash(hovering);
+      }
+    }
   };
 
   const onStagePointerUp = async (e) => {
-    if (!dragRef.current.dragging) return;
-    dragRef.current.dragging = false;
-
-    if (!activeProject || !currentMedia) return;
-    if (!stageRef.current) return;
+    if (dragRef.current.timer) {
+      clearTimeout(dragRef.current.timer);
+      dragRef.current.timer = null;
+    }
 
     const hotspotId = dragRef.current.hotspotId;
+    const wasDragging = dragRef.current.dragging;
+    const clientX = e.clientX ?? (e.changedTouches?.[0]?.clientX);
+    const clientY = e.clientY ?? (e.changedTouches?.[0]?.clientY);
+
+    // Calculate if we dropped it directly into the trash
+    let droppedInTrash = false;
+    if (wasDragging && trashRef.current && clientX != null && clientY != null) {
+      const tRect = trashRef.current.getBoundingClientRect();
+      droppedInTrash =
+        clientX >= tRect.left &&
+        clientX <= tRect.right &&
+        clientY >= tRect.top &&
+        clientY <= tRect.bottom;
+    }
+
     dragRef.current.hotspotId = null;
+    dragRef.current.dragging = false;
+    setDraggingPinId(null);
+    setIsHoveringTrash(false);
+    const pinDataToSave = optimisticPin;
+    setOptimisticPin(null);
+
     if (!hotspotId) return;
 
-    try {
-      const rect = stageRef.current.getBoundingClientRect();
-      const x = clamp01((e.clientX - rect.left) / rect.width);
-      const y = clamp01((e.clientY - rect.top) / rect.height);
+    if (!wasDragging) {
+      const hotspot = currentHotspots.find(h => h.id === hotspotId);
+      if (hotspot && !isAddPinMode) {
+        openPinEditor(currentMedia.sessionId, currentMedia.id, hotspot);
+      }
+      return;
+    }
 
-      await updateHotspotInMedia(
-        activeProject.id,
-        currentMedia.sessionId,
-        currentMedia.id,
-        hotspotId,
-        { x, y }
-      );
-    } catch (err) {
-      console.error("Failed to move pin:", err);
+    if (droppedInTrash && activeProject && currentMedia) {
+      try {
+        await deleteHotspotFromMedia(activeProject.id, currentMedia.sessionId, currentMedia.id, hotspotId);
+      } catch (err) {
+        console.error("Failed to incinerate pin:", err);
+      }
+      return;
+    }
+
+    if (pinDataToSave && activeProject && currentMedia) {
+      try {
+        await updateHotspotInMedia(
+          activeProject.id,
+          currentMedia.sessionId,
+          currentMedia.id,
+          hotspotId,
+          { x: pinDataToSave.x, y: pinDataToSave.y }
+        );
+      } catch (err) {
+        console.error("Failed to move pin:", err);
+      }
     }
   };
 
@@ -245,7 +327,8 @@ function VaultShell() {
       <div className={`w-full transition-all duration-300 flex justify-center ${view === "dashboard" ? "md:pl-64" : ""}`}>
         <div className={`w-full ${view === "dashboard" ? "max-w-md" : "max-w-6xl"} min-h-screen bg-white shadow-2xl relative border-x border-gray-200`}>
           
-          {view !== "dashboard" && (
+          {/* Dashboard Header */}
+          {view === "project" && (
             <div className="px-4 pt-12 pb-3 flex justify-between items-center bg-white/80 backdrop-blur-md border-b border-gray-200 z-40 sticky top-0">
               <button onClick={goBack} className="flex items-center text-gray-600 hover:text-black transition-colors">
                 <ChevronLeft className="w-6 h-6" />
@@ -262,6 +345,7 @@ function VaultShell() {
             </div>
           )}
 
+          {/* DASHBOARD VIEW */}
           {view === "dashboard" && (
             <div className="p-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
               <div className="flex justify-between items-center mb-6 pt-8">
@@ -274,6 +358,7 @@ function VaultShell() {
             </div>
           )}
 
+          {/* PROJECT VIEW */}
           {view === "project" && activeProject && (
             <div className="p-5 md:p-10 animate-in slide-in-from-right-4 duration-300">
               <div className="flex items-start justify-between gap-4">
@@ -318,93 +403,122 @@ function VaultShell() {
                   </div>
                 </div>
               ))}
-
-              {(!activeProject.sessions || activeProject.sessions.length === 0) && (
-                <div onClick={() => setMediaOpen(true)} className="border-2 border-dashed border-gray-200 rounded-2xl p-10 flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-black hover:bg-gray-50 transition-all group">
-                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center group-hover:bg-black group-hover:text-white transition-colors">
-                    <Upload className="w-8 h-8" />
-                  </div>
-                  <p className="font-bold text-gray-400 uppercase tracking-widest group-hover:text-black">Add First Media</p>
-                </div>
-              )}
             </div>
           )}
 
+          {/* STRICT FULL-SCREEN MEDIA VIEW */}
           {view === "media" && activeProject && currentMedia && (
-            <div className="h-full flex flex-col animate-in zoom-in-95 duration-200 relative">
-              <div className="flex-1 bg-black flex items-center justify-center relative overflow-hidden">
-                <div
-                  ref={stageRef}
-                  className={`relative w-full h-full max-w-6xl max-h-[80vh] md:max-h-[85vh] touch-none select-none transition-all ${isAddPinMode ? "cursor-crosshair opacity-90" : ""}`}
-                  onClick={handleStageClickToAddPin}
-                  onPointerMove={onStagePointerMove}
-                  onPointerUp={onStagePointerUp}
-                >
-                  <img
-                    src={currentMedia.url}
-                    className="w-full h-full object-contain"
-                    alt=""
-                    draggable={false}
-                  />
-
-                  {currentHotspots.map((h, idx) => {
-                    const left = `${clamp01(h.x) * 100}%`;
-                    const top = `${clamp01(h.y) * 100}%`;
-                    const number = idx + 1;
-
-                    return (
-                      <button
-                        key={h.id}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!isAddPinMode) openPinEditor(currentMedia.sessionId, currentMedia.id, h);
-                        }}
-                        onPointerDown={(e) => {
-                          if (!isAddPinMode) onPinPointerDown(e, h.id);
-                        }}
-                        className={`absolute -translate-x-1/2 -translate-y-1/2 transition-all ${isAddPinMode ? 'pointer-events-none opacity-40 scale-75' : 'pointer-events-auto cursor-pointer hover:scale-110 z-10'}`}
-                        style={{ left, top }}
-                        aria-label="Pin"
-                      >
-                        <div className="w-9 h-9 rounded-full bg-white text-black font-black text-xs flex items-center justify-center shadow-2xl border border-black/20 active:scale-95 transition">
-                          {number}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* --- THE ADD PIN BUTTON --- */}
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 z-50">
-                  <button
-                    onClick={() => setIsAddPinMode(!isAddPinMode)}
-                    className={`px-6 py-3 rounded-full font-black text-xs uppercase tracking-widest shadow-2xl transition-all flex items-center gap-2 ${
-                      isAddPinMode 
-                        ? 'bg-white text-black animate-pulse' 
-                        : 'bg-black text-white border border-white/20 hover:bg-gray-900'
-                    }`}
-                  >
-                    {isAddPinMode ? (
-                      <>
-                        <X className="w-4 h-4" /> Cancel Pin
-                      </>
-                    ) : (
-                      <>
-                        <MapPin className="w-4 h-4" /> Add Pin
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {isAddPinMode && (
-                  <div className="absolute top-6 left-1/2 -translate-x-1/2 text-center pointer-events-none z-50 animate-in fade-in slide-in-from-top-2">
-                    <span className="inline-block bg-white text-black text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full shadow-lg border border-gray-200">
-                      Tap anywhere to drop a pin
-                    </span>
-                  </div>
-                )}
+            <div className="fixed inset-0 z-[100] bg-black flex flex-col overflow-hidden touch-none animate-in fade-in zoom-in-95 duration-200">
+              
+              {/* Media Header (Always visible above the image) */}
+              <div className="absolute top-0 inset-x-0 p-6 z-50 flex justify-between items-center pointer-events-none">
+                <button onClick={goBack} className="pointer-events-auto w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white border border-white/10 hover:bg-black/80 transition-colors">
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
               </div>
+
+              {/* The Glass Box / Stage */}
+              <div
+                ref={stageRef}
+                className={`w-full h-full relative flex items-center justify-center transition-all ${isAddPinMode ? "cursor-crosshair" : ""}`}
+                onClick={handleStageClickToAddPin}
+                onPointerMove={onStagePointerMove}
+                onPointerUp={onStagePointerUp}
+                onPointerLeave={onStagePointerUp} // Safety catch if finger slides off screen
+              >
+                <img
+                  src={currentMedia.url}
+                  className={`max-w-full max-h-full object-contain transition-opacity duration-300 ${isAddPinMode ? 'opacity-70' : 'opacity-100'}`}
+                  alt=""
+                  draggable={false}
+                />
+
+                {currentHotspots.map((h, idx) => {
+                  const displayX = optimisticPin?.id === h.id ? optimisticPin.x : h.x;
+                  const displayY = optimisticPin?.id === h.id ? optimisticPin.y : h.y;
+                  
+                  const left = `${clamp01(displayX) * 100}%`;
+                  const top = `${clamp01(displayY) * 100}%`;
+                  const number = idx + 1;
+
+                  return (
+                    <button
+                      key={h.id}
+                      type="button"
+                      onPointerDown={(e) => {
+                        if (!isAddPinMode) onPinPointerDown(e, h);
+                      }}
+                      className={`absolute -translate-x-1/2 -translate-y-1/2 transition-all duration-100 ${
+                        isAddPinMode 
+                          ? 'pointer-events-none opacity-20 scale-75' 
+                          : 'pointer-events-auto cursor-pointer z-10'
+                      } ${
+                        draggingPinId === h.id 
+                          ? 'scale-125 z-50' 
+                          : 'hover:scale-110'
+                      }`}
+                      style={{ left, top }}
+                      aria-label="Pin"
+                    >
+                      <div className={`w-9 h-9 rounded-full font-black text-xs flex items-center justify-center shadow-[0_0_20px_rgba(0,0,0,0.5)] border-2 transition-colors ${
+                        draggingPinId === h.id 
+                          ? 'bg-black text-white border-white' 
+                          : 'bg-white text-black border-transparent'
+                      }`}>
+                        {number}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Bottom Action Area (Always above the fold) */}
+              <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-4 z-50 pointer-events-none">
+                
+                {/* Trash Chute (Replaces Add Pin when dragging) */}
+                <div 
+                  ref={trashRef}
+                  className={`absolute left-1/2 -translate-x-1/2 transition-all duration-300 pointer-events-auto ${
+                    draggingPinId ? 'translate-y-0 opacity-100 scale-100' : 'translate-y-10 opacity-0 scale-50'
+                  }`}
+                >
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center shadow-2xl transition-all duration-200 ${
+                    isHoveringTrash ? 'bg-red-600 text-white scale-125 border-4 border-red-400' : 'bg-black/80 backdrop-blur-md text-red-500 border border-white/20'
+                  }`}>
+                    <Trash2 className="w-6 h-6" />
+                  </div>
+                </div>
+
+                {/* Add Pin Button (Hides when dragging) */}
+                <button
+                  onClick={() => setIsAddPinMode(!isAddPinMode)}
+                  className={`pointer-events-auto px-6 py-4 rounded-full font-black text-xs uppercase tracking-widest shadow-2xl transition-all flex items-center gap-2 ${
+                    draggingPinId ? 'opacity-0 scale-50 pointer-events-none' : 'opacity-100 scale-100'
+                  } ${
+                    isAddPinMode 
+                      ? 'bg-white text-black animate-pulse' 
+                      : 'bg-black/80 backdrop-blur-md text-white border border-white/20 hover:bg-black'
+                  }`}
+                >
+                  {isAddPinMode ? (
+                    <>
+                      <X className="w-4 h-4" /> Cancel Pin
+                    </>
+                  ) : (
+                    <>
+                      <MapPin className="w-4 h-4" /> Add Pin
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {isAddPinMode && (
+                <div className="absolute top-24 left-1/2 -translate-x-1/2 text-center pointer-events-none z-50 animate-in fade-in slide-in-from-top-2">
+                  <span className="inline-block bg-white/90 backdrop-blur-md text-black text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full shadow-2xl">
+                    Tap anywhere to drop a pin
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -413,8 +527,8 @@ function VaultShell() {
         <AddMediaModal isOpen={mediaOpen} onClose={() => setMediaOpen(false)} project={activeProject} onAddMedia={handleAddMedia} mode="upload" existingSessions={activeProject?.sessions || []} />
 
         {pinOpen && (
-          <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-150">
-            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setPinOpen(false)} />
+          <div className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-150">
+            <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setPinOpen(false)} />
             <div className="relative w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden">
               <div className="px-5 py-4 flex justify-between items-center border-b border-gray-100">
                 <div className="flex items-center gap-2">
