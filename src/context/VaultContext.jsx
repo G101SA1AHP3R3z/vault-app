@@ -11,13 +11,12 @@ import {
   getDoc,
   deleteDoc,
 } from "firebase/firestore";
-import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { auth, db, storage } from "../lib/firebase";
 
 const VaultContext = createContext();
 
-// --- helpers ---
 const formatDateShort = (d = new Date()) =>
   d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
 
@@ -27,17 +26,15 @@ export function VaultProvider({ children }) {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
 
-  // UI state
   const [view, setView] = useState("dashboard");
   const [tab, setTab] = useState("library");
   const [activeProject, setActiveProject] = useState(null);
   const [activeMedia, setActiveMedia] = useState(null);
   const [search, setSearch] = useState("");
 
-  // Data state
   const [projects, setProjects] = useState([]);
 
-  // 1) Auth Listener
+  // Auth Bouncer
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u || null);
@@ -46,39 +43,27 @@ export function VaultProvider({ children }) {
     return () => unsub();
   }, []);
 
-  const ensureSignedIn = async () => {
-    if (!auth.currentUser) {
-      await signInAnonymously(auth);
-    }
-  };
-
-  // 2) Subscribe to projects
   useEffect(() => {
     if (!user) {
       setProjects([]);
       return;
     }
-
     const qy = query(collection(db, "projects"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(qy, (snapshot) => {
       const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
       setProjects(list);
     });
-
     return () => unsub();
   }, [user]);
 
-  // 3) Keep activeProject fresh when projects list updates
   useEffect(() => {
     if (!activeProject?.id) return;
     const updated = projects.find((p) => p.id === activeProject.id);
     if (updated) setActiveProject(updated);
   }, [projects, activeProject?.id]);
 
-  // 4) Actions
   const addProject = async ({ title, aiTags = [], note = "" }) => {
     if (!user) return null;
-
     const newProject = {
       title: title || "Untitled Project",
       aiTags,
@@ -88,9 +73,8 @@ export function VaultProvider({ children }) {
       createdBy: user.uid,
       sessions: [],
       expiresIn: "30 Days",
-      coverPhoto: "", // <-- important: this is what the grid uses
+      coverPhoto: "", 
     };
-
     const docRef = await addDoc(collection(db, "projects"), newProject);
     return { id: docRef.id, ...newProject };
   };
@@ -98,18 +82,15 @@ export function VaultProvider({ children }) {
   const deleteProject = async (projectId) => {
     if (!user || !projectId) return;
     await deleteDoc(doc(db, "projects", projectId));
-
     if (activeProject?.id === projectId) {
       setActiveProject(null);
       setView("dashboard");
     }
   };
 
-  // --- Upload media + update sessions + update cover photo ---
   const addMediaToProject = async (projectId, file, sessionId = null, sessionTitle = "") => {
     if (!user || !file || !projectId) return;
 
-    // 1) Upload to Storage
     const safeName = (file.name || "upload").replace(/[^\w.-]+/g, "_");
     const storagePath = `projects/${projectId}/${Date.now()}_${safeName}`;
     const fileRef = storageRef(storage, storagePath);
@@ -117,7 +98,6 @@ export function VaultProvider({ children }) {
     await uploadBytes(fileRef, file);
     const url = await getDownloadURL(fileRef);
 
-    // 2) Create media object
     const isVideo = file.type?.startsWith("video");
     const newMedia = {
       id: `m-${Date.now()}`,
@@ -128,7 +108,6 @@ export function VaultProvider({ children }) {
       hotspots: [],
     };
 
-    // 3) Read existing project
     const projectRef = doc(db, "projects", projectId);
     const snap = await getDoc(projectRef);
     if (!snap.exists()) return;
@@ -136,7 +115,6 @@ export function VaultProvider({ children }) {
     const data = snap.data();
     let sessions = Array.isArray(data.sessions) ? data.sessions : [];
 
-    // 4) Put media into session
     if (sessionId) {
       sessions = sessions.map((s) => {
         if (s.id !== sessionId) return s;
@@ -153,23 +131,93 @@ export function VaultProvider({ children }) {
       sessions = [newSession, ...sessions];
     }
 
-    // 5) Cover photo logic (this is the missing piece)
-    // - If it's a photo, use it as the cover (newest wins).
-    // - If it's a video, leave cover alone unless there isn't one.
     let coverPhoto = data.coverPhoto || "";
     if (!isVideo) coverPhoto = url;
     if (isVideo && !coverPhoto) coverPhoto = url;
 
-    // 6) Save to Firestore
     await updateDoc(projectRef, { sessions, coverPhoto });
 
-    // Optional: make UI feel instant (Firestore should update anyway)
     if (activeProject?.id === projectId) {
       setActiveProject((p) => (p ? { ...p, sessions, coverPhoto } : p));
     }
   };
 
-  // Filtering Logic
+  // --- THE MISSING PIN FUNCTIONS ---
+  const addHotspotToMedia = async (projectId, sessionId, mediaId, hotspotData) => {
+    if (!user || !projectId) return;
+    const projectRef = doc(db, "projects", projectId);
+    const snap = await getDoc(projectRef);
+    if (!snap.exists()) return;
+
+    const data = snap.data();
+    const sessions = (data.sessions || []).map((session) => {
+      if (session.id !== sessionId) return session;
+      const media = (session.media || []).map((m) => {
+        if (m.id !== mediaId) return m;
+        const hotspots = Array.isArray(m.hotspots) ? m.hotspots : [];
+        return {
+          ...m,
+          hotspots: [...hotspots, { id: `h-${Date.now()}`, ...hotspotData }],
+        };
+      });
+      return { ...session, media };
+    });
+
+    await updateDoc(projectRef, { sessions });
+    if (activeProject?.id === projectId) {
+      setActiveProject((p) => (p ? { ...p, sessions } : p));
+    }
+  };
+
+  const updateHotspotInMedia = async (projectId, sessionId, mediaId, hotspotId, updates) => {
+    if (!user || !projectId) return;
+    const projectRef = doc(db, "projects", projectId);
+    const snap = await getDoc(projectRef);
+    if (!snap.exists()) return;
+
+    const data = snap.data();
+    const sessions = (data.sessions || []).map((session) => {
+      if (session.id !== sessionId) return session;
+      const media = (session.media || []).map((m) => {
+        if (m.id !== mediaId) return m;
+        const hotspots = (m.hotspots || []).map((h) => {
+          if (h.id !== hotspotId) return h;
+          return { ...h, ...updates };
+        });
+        return { ...m, hotspots };
+      });
+      return { ...session, media };
+    });
+
+    await updateDoc(projectRef, { sessions });
+    if (activeProject?.id === projectId) {
+      setActiveProject((p) => (p ? { ...p, sessions } : p));
+    }
+  };
+
+  const deleteHotspotFromMedia = async (projectId, sessionId, mediaId, hotspotId) => {
+    if (!user || !projectId) return;
+    const projectRef = doc(db, "projects", projectId);
+    const snap = await getDoc(projectRef);
+    if (!snap.exists()) return;
+
+    const data = snap.data();
+    const sessions = (data.sessions || []).map((session) => {
+      if (session.id !== sessionId) return session;
+      const media = (session.media || []).map((m) => {
+        if (m.id !== mediaId) return m;
+        const hotspots = (m.hotspots || []).filter((h) => h.id !== hotspotId);
+        return { ...m, hotspots };
+      });
+      return { ...session, media };
+    });
+
+    await updateDoc(projectRef, { sessions });
+    if (activeProject?.id === projectId) {
+      setActiveProject((p) => (p ? { ...p, sessions } : p));
+    }
+  };
+
   const filteredProjects = useMemo(() => {
     let list =
       tab === "library"
@@ -186,33 +234,30 @@ export function VaultProvider({ children }) {
           safeArray(p.aiTags).some((t) => (t || "").toLowerCase().includes(q))
       );
     }
-
     return list;
   }, [projects, tab, search]);
 
   const value = {
     user,
     authReady,
-    ensureSignedIn,
-
     view,
     setView,
     tab,
     setTab,
-
     activeProject,
     setActiveProject,
     activeMedia,
     setActiveMedia,
-
     search,
     setSearch,
-
     filteredProjects,
-
     addProject,
     deleteProject,
     addMediaToProject,
+    // The Holy Trinity exported correctly this time
+    addHotspotToMedia,
+    updateHotspotInMedia,
+    deleteHotspotFromMedia,
   };
 
   return <VaultContext.Provider value={value}>{children}</VaultContext.Provider>;
