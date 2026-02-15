@@ -1,13 +1,15 @@
-import React, { useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   Share,
   Play,
-  Camera,
-  MapPin,
   Mic,
   Plus,
   Trash2,
+  Upload,
+  X,
+  Pencil,
+  Loader2,
 } from "lucide-react";
 
 import { VaultProvider, useVault } from "./context/VaultContext";
@@ -16,9 +18,41 @@ import MediaCard from "./components/MediaCard";
 import NewProjectModal from "./components/NewProjectModal";
 import AddMediaModal from "./components/AddMediaModal";
 import LibraryGrid from "./features/library/LibraryGrid";
+import Login from "./components/Login"; 
 
+function clamp01(n) {
+  const x = Number(n);
+  if (Number.isNaN(x)) return 0;
+  return Math.max(0, Math.min(1, x));
+}
+
+// --- THE BOUNCER ---
+function AuthGate({ children }) {
+  const { user, authReady } = useVault();
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-black" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Login />;
+  }
+
+  return children;
+}
+
+// --- MAIN APP SHELL ---
 function VaultShell() {
-  const {
+  // 🚨 THE SANITY CHECK 🚨
+  const vaultStuff = useVault();
+  console.log("WHAT THE HELL IS IN THE VAULT:", Object.keys(vaultStuff || {}));
+
+  // Destructuring from our tapped line instead of calling the hook twice
+    const {
     view,
     setView,
     tab,
@@ -28,16 +62,37 @@ function VaultShell() {
     activeMedia,
     setActiveMedia,
     addProject,
-    addMediaToProject, // IMPORTED
+    addMediaToProject,
     deleteProject,
+
+    // ✅ add these:
+    ensureSignedIn,
+    addHotspotToMedia,
+    updateHotspotInMedia,
+    deleteHotspotFromMedia,
   } = useVault();
+
 
   const [newOpen, setNewOpen] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
-  const [mediaMode, setMediaMode] = useState("upload");
 
-  const navigateToMedia = (m) => {
-    setActiveMedia(m);
+  // Pin editor state
+  const [pinOpen, setPinOpen] = useState(false);
+  const [pinDraft, setPinDraft] = useState({ label: "", note: "" });
+  const [pinTarget, setPinTarget] = useState(null); 
+
+  // Dragging state
+  const dragRef = useRef({
+    dragging: false,
+    hotspotId: null,
+    startX: 0,
+    startY: 0,
+  });
+
+  const stageRef = useRef(null);
+
+  const navigateToMedia = (m, sessionId) => {
+    setActiveMedia({ ...m, sessionId });
     setView("media");
   };
 
@@ -80,34 +135,180 @@ function VaultShell() {
     }
   };
 
+  const currentMedia = useMemo(() => {
+    if (!activeProject || !activeMedia?.id) return null;
+    const sid = activeMedia.sessionId;
+    const session = (activeProject.sessions || []).find((s) => s.id === sid);
+    if (!session) return null;
+    const media = (session.media || []).find((mm) => mm.id === activeMedia.id);
+    return media ? { ...media, sessionId: sid } : null;
+  }, [activeProject, activeMedia?.id, activeMedia?.sessionId]);
+
+  const currentHotspots = currentMedia?.hotspots || [];
+
+  const handleStageClickToAddPin = async (e) => {
+    try {
+      if (!activeProject || !currentMedia) return;
+      if (!stageRef.current) return;
+
+      const rect = stageRef.current.getBoundingClientRect();
+      const clientX = e.clientX ?? (e.touches?.[0]?.clientX);
+      const clientY = e.clientY ?? (e.touches?.[0]?.clientY);
+      if (clientX == null || clientY == null) return;
+
+      const x = clamp01((clientX - rect.left) / rect.width);
+      const y = clamp01((clientY - rect.top) / rect.height);
+
+      if (typeof addHotspotToMedia !== "function") {
+        throw new Error(
+          "addHotspotToMedia is missing. Check VaultContext value export + App import path."
+        );
+      }
+
+      await addHotspotToMedia(activeProject.id, currentMedia.sessionId, currentMedia.id, {
+        x,
+        y,
+        label: "",
+        note: "",
+      });
+    } catch (err) {
+      console.error("Failed to save pin:", err);
+      alert("Failed to save pin. Check console.");
+    }
+  };
+
+  const openPinEditor = (sessionId, mediaId, hotspot) => {
+    setPinTarget({ sessionId, mediaId, hotspotId: hotspot.id });
+    setPinDraft({ label: hotspot.label || "", note: hotspot.note || "" });
+    setPinOpen(true);
+  };
+
+  const savePinEdits = async () => {
+    if (!activeProject || !pinTarget) return;
+    try {
+      await updateHotspotInMedia(
+        activeProject.id,
+        pinTarget.sessionId,
+        pinTarget.mediaId,
+        pinTarget.hotspotId,
+        {
+          label: pinDraft.label || "",
+          note: pinDraft.note || "",
+        }
+      );
+      setPinOpen(false);
+      setPinTarget(null);
+    } catch (e) {
+      console.error("Failed to update pin:", e);
+      alert("Failed to update pin. Check console.");
+    }
+  };
+
+  const deletePin = async () => {
+    if (!activeProject || !pinTarget) return;
+    if (!confirm("Delete this pin?")) return;
+    try {
+      await deleteHotspotFromMedia(
+        activeProject.id,
+        pinTarget.sessionId,
+        pinTarget.mediaId,
+        pinTarget.hotspotId
+      );
+      setPinOpen(false);
+      setPinTarget(null);
+    } catch (e) {
+      console.error("Failed to delete pin:", e);
+      alert("Failed to delete pin. Check console.");
+    }
+  };
+
+  const onPinPointerDown = (e, hotspotId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragRef.current.dragging = true;
+    dragRef.current.hotspotId = hotspotId;
+    dragRef.current.startX = e.clientX;
+    dragRef.current.startY = e.clientY;
+
+    try {
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    } catch {}
+  };
+
+  const onStagePointerMove = async (e) => {
+    if (!dragRef.current.dragging) return;
+    if (!activeProject || !currentMedia) return;
+    if (!stageRef.current) return;
+    const hotspotId = dragRef.current.hotspotId;
+    if (!hotspotId) return;
+  };
+
+  const onStagePointerUp = async (e) => {
+    if (!dragRef.current.dragging) return;
+    dragRef.current.dragging = false;
+
+    if (!activeProject || !currentMedia) return;
+    if (!stageRef.current) return;
+
+    const hotspotId = dragRef.current.hotspotId;
+    dragRef.current.hotspotId = null;
+    if (!hotspotId) return;
+
+    try {
+      const rect = stageRef.current.getBoundingClientRect();
+      const x = clamp01((e.clientX - rect.left) / rect.width);
+      const y = clamp01((e.clientY - rect.top) / rect.height);
+
+      await updateHotspotInMedia(
+        activeProject.id,
+        currentMedia.sessionId,
+        currentMedia.id,
+        hotspotId,
+        { x, y }
+      );
+    } catch (err) {
+      console.error("Failed to move pin:", err);
+      alert("Failed to move pin. Check console.");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100 text-gray-900 flex justify-center items-center font-sans antialiased selection:bg-black selection:text-white">
-      
-      {/* Navigation Layer */}
       {view === "dashboard" && <Navigation currentTab={tab} setTab={setTab} />}
 
-      <div className={`w-full transition-all duration-300 flex justify-center ${view === "dashboard" ? "md:pl-64" : ""}`}>
-        <div className={`w-full ${view === "dashboard" ? "max-w-md" : "max-w-6xl"} min-h-screen bg-white shadow-2xl relative border-x border-gray-200`}>
-          
-          {/* Header */}
+      <div
+        className={`w-full transition-all duration-300 flex justify-center ${
+          view === "dashboard" ? "md:pl-64" : ""
+        }`}
+      >
+        <div
+          className={`w-full ${
+            view === "dashboard" ? "max-w-md" : "max-w-6xl"
+          } min-h-screen bg-white shadow-2xl relative border-x border-gray-200`}
+        >
           {view !== "dashboard" && (
             <div className="px-4 pt-12 pb-3 flex justify-between items-center bg-white/80 backdrop-blur-md border-b border-gray-200 z-40 sticky top-0">
-              <button onClick={goBack} className="flex items-center text-gray-600 hover:text-black transition-colors">
+              <button
+                onClick={goBack}
+                className="flex items-center text-gray-600 hover:text-black transition-colors"
+              >
                 <ChevronLeft className="w-6 h-6" />
                 <span className="font-semibold text-sm">Back</span>
               </button>
               <div className="flex gap-2">
-                 <button onClick={handleDeleteProject} className="text-red-500 hover:bg-red-50 p-2 rounded-full transition-colors">
-                    <Trash2 className="w-4 h-4" />
-                 </button>
-                 <button className="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 text-black px-3 py-1.5 rounded text-[10px] font-bold transition-colors border border-gray-300 uppercase tracking-tighter">
-                   <Share className="w-3 h-3" /> Export
-                 </button>
+                <button
+                  onClick={handleDeleteProject}
+                  className="text-red-500 hover:bg-red-50 p-2 rounded-full transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+                <button className="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 text-black px-3 py-1.5 rounded text-[10px] font-bold transition-colors border border-gray-300 uppercase tracking-tighter">
+                  <Share className="w-3 h-3" /> Export
+                </button>
               </div>
             </div>
           )}
 
-          {/* DASHBOARD */}
           {view === "dashboard" && (
             <div className="p-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
               <div className="flex justify-between items-center mb-6 pt-8">
@@ -123,29 +324,42 @@ function VaultShell() {
             </div>
           )}
 
-          {/* PROJECT VIEW */}
           {view === "project" && activeProject && (
             <div className="p-5 md:p-10 animate-in slide-in-from-right-4 duration-300">
-              <h2 className="text-4xl md:text-6xl font-black uppercase mb-6 leading-none tracking-tighter text-black">
-                {activeProject.title}
-              </h2>
-              
+              <div className="flex items-start justify-between gap-4">
+                <h2 className="text-4xl md:text-6xl font-black uppercase mb-6 leading-none tracking-tighter text-black">
+                  {activeProject.title}
+                </h2>
+
+                <button
+                  onClick={() => setMediaOpen(true)}
+                  className="shrink-0 mt-2 px-3 py-2 rounded-xl bg-black text-white font-black text-xs uppercase tracking-tight flex items-center gap-2 active:scale-95 transition"
+                >
+                  <Upload className="w-4 h-4" />
+                  Add Media
+                </button>
+              </div>
+
               <div className="flex flex-wrap gap-1 mb-8">
                 {activeProject.aiTags?.map((tag) => (
-                  <span key={tag} className="text-[10px] font-bold uppercase bg-gray-100 border px-3 py-1 rounded text-gray-500">
+                  <span
+                    key={tag}
+                    className="text-[10px] font-bold uppercase bg-gray-100 border px-3 py-1 rounded text-gray-500"
+                  >
                     #{tag}
                   </span>
                 ))}
               </div>
 
-              {/* Context Memo */}
               {activeProject.overallAudio && (
                 <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 mb-10 shadow-sm flex gap-4">
                   <button className="w-12 h-12 bg-black text-white rounded-full flex items-center justify-center shrink-0 shadow-lg hover:scale-105 transition-transform">
                     <Play className="w-5 h-5 ml-1" />
                   </button>
                   <div className="flex-1">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Project Context</p>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">
+                      Project Context
+                    </p>
                     <p className="text-sm text-gray-900 leading-relaxed italic">
                       "{activeProject.overallAudio}"
                     </p>
@@ -153,65 +367,100 @@ function VaultShell() {
                 </div>
               )}
 
-              {/* Sessions */}
               {(activeProject.sessions || []).map((session) => (
                 <div key={session.id} className="mb-12">
                   <div className="flex justify-between items-baseline border-b-2 border-black pb-2 mb-4">
-                    <h3 className="font-black text-sm uppercase text-black">
-                      {session.title}
-                    </h3>
-                    <p className="text-xs font-mono text-gray-400">
-                      {session.date}
-                    </p>
+                    <h3 className="font-black text-sm uppercase text-black">{session.title}</h3>
+                    <p className="text-xs font-mono text-gray-400">{session.date}</p>
                   </div>
+
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
                     {(session.media || []).map((m) => (
-                      <MediaCard key={m.id} item={m} onClick={() => navigateToMedia(m)} />
+                      <MediaCard
+                        key={m.id}
+                        item={m}
+                        onClick={() => navigateToMedia(m, session.id)}
+                      />
                     ))}
-                    {/* Add to Existing Session */}
-                    <div 
-                      onClick={() => { setMediaMode('camera'); setMediaOpen(true); }}
-                      className="aspect-square bg-gray-50 rounded border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300 hover:text-black hover:border-black transition-all cursor-pointer"
-                    >
-                      <Camera className="w-6 h-6" />
-                    </div>
                   </div>
                 </div>
               ))}
-              
-              {/* Add First Session */}
+
               {(!activeProject.sessions || activeProject.sessions.length === 0) && (
-                <div 
-                   onClick={() => { setMediaMode('camera'); setMediaOpen(true); }}
-                   className="border-2 border-dashed border-gray-200 rounded-2xl p-10 flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-black hover:bg-gray-50 transition-all group"
+                <div
+                  onClick={() => setMediaOpen(true)}
+                  className="border-2 border-dashed border-gray-200 rounded-2xl p-10 flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-black hover:bg-gray-50 transition-all group"
                 >
-                   <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center group-hover:bg-black group-hover:text-white transition-colors">
-                      <Camera className="w-8 h-8" />
-                   </div>
-                   <p className="font-bold text-gray-400 uppercase tracking-widest group-hover:text-black">Start First Session</p>
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center group-hover:bg-black group-hover:text-white transition-colors">
+                    <Upload className="w-8 h-8" />
+                  </div>
+                  <p className="font-bold text-gray-400 uppercase tracking-widest group-hover:text-black">
+                    Add First Media
+                  </p>
                 </div>
               )}
             </div>
           )}
-          
-          {/* MEDIA VIEW */}
-          {view === "media" && activeMedia && (
+
+          {view === "media" && activeProject && currentMedia && (
             <div className="h-full flex flex-col animate-in zoom-in-95 duration-200">
-               <div className="flex-1 bg-black flex items-center justify-center relative group">
-                  <img src={activeMedia.url} className="max-h-full max-w-full object-contain" alt="" />
-               </div>
-               {/* Detail Footer */}
-               <div className="p-5 border-t border-gray-200 bg-white">
-                  <button className="w-full py-4 bg-black text-white font-black rounded flex items-center justify-center gap-2 active:scale-95 transition-all">
-                    <Mic className="w-5 h-5" /> Hold to Voice-Pin
-                  </button>
-               </div>
+              <div className="flex-1 bg-black flex items-center justify-center relative">
+                <div
+                  ref={stageRef}
+                  className="relative w-full h-full max-w-6xl max-h-[80vh] md:max-h-[85vh] touch-none select-none"
+                  onClick={handleStageClickToAddPin}
+                  onPointerMove={onStagePointerMove}
+                  onPointerUp={onStagePointerUp}
+                >
+                  <img
+                    src={currentMedia.url}
+                    className="w-full h-full object-contain"
+                    alt=""
+                    draggable={false}
+                  />
+
+                  {currentHotspots.map((h, idx) => {
+                    const left = `${clamp01(h.x) * 100}%`;
+                    const top = `${clamp01(h.y) * 100}%`;
+                    const number = idx + 1;
+
+                    return (
+                      <button
+                        key={h.id}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openPinEditor(currentMedia.sessionId, currentMedia.id, h);
+                        }}
+                        onPointerDown={(e) => onPinPointerDown(e, h.id)}
+                        className="absolute -translate-x-1/2 -translate-y-1/2"
+                        style={{ left, top }}
+                        aria-label="Pin"
+                      >
+                        <div className="w-9 h-9 rounded-full bg-white text-black font-black text-xs flex items-center justify-center shadow-2xl border border-black/20 active:scale-95 transition">
+                          {number}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="absolute bottom-3 left-3 right-3 text-center pointer-events-none">
+                  <span className="inline-block bg-black/60 text-white text-[10px] font-bold uppercase tracking-widest px-3 py-2 rounded-full">
+                    Tap to add pin • Drag to move • Tap pin to edit
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-5 border-t border-gray-200 bg-white flex gap-3">
+                <button className="flex-1 py-4 bg-black text-white font-black rounded flex items-center justify-center gap-2 active:scale-95 transition-all">
+                  <Mic className="w-5 h-5" /> Hold to Voice-Pin
+                </button>
+              </div>
             </div>
           )}
-
         </div>
 
-        {/* Modals */}
         <NewProjectModal
           open={newOpen}
           onClose={() => setNewOpen(false)}
@@ -223,9 +472,71 @@ function VaultShell() {
           onClose={() => setMediaOpen(false)}
           project={activeProject}
           onAddMedia={handleAddMedia}
-          mode={mediaMode} // "camera" or "upload"
+          mode="upload"
           existingSessions={activeProject?.sessions || []}
         />
+
+        {pinOpen && (
+          <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-150">
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setPinOpen(false)} />
+            <div className="relative w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden">
+              <div className="px-5 py-4 flex justify-between items-center border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  <Pencil className="w-4 h-4" />
+                  <h3 className="text-sm font-black uppercase tracking-tight">Edit Pin</h3>
+                </div>
+                <button
+                  onClick={() => setPinOpen(false)}
+                  className="p-2 hover:bg-gray-100 rounded-full"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">
+                    Label (optional)
+                  </label>
+                  <input
+                    value={pinDraft.label}
+                    onChange={(e) => setPinDraft((p) => ({ ...p, label: e.target.value }))}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 ring-black"
+                    placeholder="e.g. Waistline"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">
+                    Note
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={pinDraft.note}
+                    onChange={(e) => setPinDraft((p) => ({ ...p, note: e.target.value }))}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 ring-black resize-none"
+                    placeholder="What needs to change here?"
+                  />
+                </div>
+              </div>
+
+              <div className="p-5 border-t border-gray-100 bg-gray-50 flex gap-3">
+                <button
+                  onClick={deletePin}
+                  className="flex-1 py-3 rounded-xl font-black text-sm text-red-600 bg-white border border-red-200 hover:bg-red-50"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={savePinEdits}
+                  className="flex-[2] py-3 rounded-xl font-black text-sm bg-black text-white hover:bg-gray-900"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -234,7 +545,9 @@ function VaultShell() {
 export default function App() {
   return (
     <VaultProvider>
-      <VaultShell />
+      <AuthGate>
+        <VaultShell />
+      </AuthGate>
     </VaultProvider>
   );
 }
