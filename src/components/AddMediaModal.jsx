@@ -7,6 +7,8 @@ export default function AddMediaModal({
   onClose,
   onAddMedia,
   existingSessions = [],
+  autoPrompt = false,
+  autoSubmit = false,
 }) {
   const OPEN = typeof isOpen === "boolean" ? isOpen : Boolean(open);
 
@@ -36,6 +38,12 @@ export default function AddMediaModal({
       setNewSessionTitle("");
       setSelectedFile(null);
       setIsSaving(false);
+      // Auto-open native picker (iOS shows camera / photo library / files)
+      if (autoPrompt) {
+        setTimeout(() => {
+          uploadInputRef.current?.click?.();
+        }, 50);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [OPEN]);
@@ -43,6 +51,10 @@ export default function AddMediaModal({
   const handlePick = (file) => {
     if (!file) return;
     setSelectedFile(file);
+    if (autoSubmit) {
+      // Fire immediately in "quick add" mode
+      setTimeout(() => handleSubmit(file), 0);
+    }
   };
 
   const handleCameraPick = (e) => {
@@ -57,12 +69,13 @@ export default function AddMediaModal({
     e.target.value = "";
   };
 
-  const handleSubmit = async () => {
-    if (!selectedFile) return;
+  const handleSubmit = async (fileOverride) => {
+    const effectiveFile = fileOverride || selectedFile;
+    if (!effectiveFile) return;
     setIsSaving(true);
     try {
       await onAddMedia({
-        file: selectedFile,
+        file: effectiveFile,
         sessionId: sessionMode === "existing" ? sessionId : null,
         sessionTitle: sessionMode === "new" ? newSessionTitle : "",
       });

@@ -139,6 +139,8 @@ function VaultShell() {
     addProject,
     addMediaToProject,
     deleteProject,
+    deleteSession,
+    signOutUser,
     deleteMediaFromProject,
     addHotspotToMedia,
     updateHotspotInMedia,
@@ -147,6 +149,7 @@ function VaultShell() {
 
   const [newOpen, setNewOpen] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
+  const [autoPromptMediaPicker, setAutoPromptMediaPicker] = useState(false);
 
   // Pins
   const [isAddPinMode, setIsAddPinMode] = useState(false);
@@ -203,6 +206,11 @@ function VaultShell() {
       setNewOpen(false);
       setActiveProject(p);
       setView("project");
+
+      // Immediately prompt iOS/native picker and auto-save the first selection
+      setAutoPromptMediaPicker(true);
+      setAutoPromptMediaPicker(false);
+    setMediaOpen(true);
     } catch (e) {
       console.error(e);
     }
@@ -233,6 +241,62 @@ function VaultShell() {
     const media = (session.media || []).find((mm) => mm.id === activeMedia.id);
     return media ? { ...media, sessionId: sid } : null;
   }, [activeProject, activeMedia?.id, activeMedia?.sessionId]);
+
+  // --- Swipe navigation (between photos in the same session) ---
+  const currentSession = useMemo(() => {
+    if (!activeProject || !currentMedia?.sessionId) return null;
+    return (activeProject.sessions || []).find((s) => s.id === currentMedia.sessionId) || null;
+  }, [activeProject, currentMedia?.sessionId]);
+
+  const sessionMediaList = currentSession?.media || [];
+  const currentMediaIndex = useMemo(() => {
+    if (!currentMedia?.id) return -1;
+    return sessionMediaList.findIndex((m) => m.id === currentMedia.id);
+  }, [sessionMediaList, currentMedia?.id]);
+
+  const goToMediaIndex = (nextIndex) => {
+    if (!activeProject || !currentSession) return;
+    if (nextIndex < 0 || nextIndex >= sessionMediaList.length) return;
+    const m = sessionMediaList[nextIndex];
+    if (!m) return;
+    setActiveMedia({ ...m, sessionId: currentSession.id });
+    setSelectedPinId(null);
+    setIsAddPinMode(false);
+    setIsFocusMode(false);
+  };
+
+  const goPrevMedia = () => goToMediaIndex(currentMediaIndex - 1);
+  const goNextMedia = () => goToMediaIndex(currentMediaIndex + 1);
+
+  const swipeRef = useRef({ down: false, x0: 0, y0: 0 });
+
+  const onStagePointerDown = (e) => {
+    if (isAddPinMode || isFocusMode) return;
+    const x = e.clientX ?? e.touches?.[0]?.clientX;
+    const y = e.clientY ?? e.touches?.[0]?.clientY;
+    if (x == null || y == null) return;
+    swipeRef.current = { down: true, x0: x, y0: y };
+  };
+
+  const onStagePointerEnd = (e) => {
+    if (isAddPinMode || isFocusMode) return;
+    if (!swipeRef.current.down) return;
+
+    const x = e.clientX ?? e.changedTouches?.[0]?.clientX ?? e.touches?.[0]?.clientX;
+    const y = e.clientY ?? e.changedTouches?.[0]?.clientY ?? e.touches?.[0]?.clientY;
+    swipeRef.current.down = false;
+    if (x == null || y == null) return;
+
+    const dx = x - swipeRef.current.x0;
+    const dy = y - swipeRef.current.y0;
+
+    // horizontal swipe threshold
+    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy)) {
+      if (dx < 0) goNextMedia();
+      else goPrevMedia();
+    }
+  };
+
 
   const currentHotspots = currentMedia?.hotspots || [];
 
@@ -525,9 +589,22 @@ function VaultShell() {
                     </div>
                   </div>
 
+                  <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => signOutUser?.()}
+                    className="h-10 px-3 rounded-[8px] text-xs font-semibold"
+                    style={{
+                      background: "rgba(255,255,255,0.70)",
+                      color: "rgba(0,0,0,0.70)",
+                      border: "1px solid rgba(0,0,0,0.10)",
+                    }}
+                  >
+                    Sign out
+                  </button>
+
                   <button
                     onClick={() => setNewOpen(true)}
-                    className="w-10 h-10 rounded-[8px] flex items-center justify-center active:scale-[0.98] transition-transform duration-200 ease-out"
+                    className="h-10 px-3 rounded-[8px] flex items-center justify-center gap-2 active:scale-[0.98] transition-transform duration-200 ease-out"
                     style={{
                       background: palette.sun,
                       color: palette.ink,
@@ -537,7 +614,11 @@ function VaultShell() {
                     aria-label="New project"
                   >
                     <Plus className="w-5 h-5" />
+                    <span className="hidden sm:inline text-xs font-black uppercase tracking-wide">
+                      Start Project
+                    </span>
                   </button>
+                </div>
                 </div>
 
                 <LibraryGrid onQuickAdd={handleQuickAdd} />
@@ -555,9 +636,15 @@ function VaultShell() {
                     {activeProject.title}
                   </h2>
 
+                  </div>
+
+                <div className="mb-6">
                   <button
-                    onClick={() => setMediaOpen(true)}
-                    className="shrink-0 mt-2 px-3 py-2 rounded-[8px] font-semibold text-xs uppercase tracking-wide flex items-center gap-2 active:scale-[0.98] transition-transform duration-200 ease-out"
+                    onClick={() => {
+                      setAutoPromptMediaPicker(false);
+                      setMediaOpen(true);
+                    }}
+                    className="px-3 py-2 rounded-[8px] font-semibold text-xs uppercase tracking-wide inline-flex items-center gap-2 active:scale-[0.98] transition-transform duration-200 ease-out"
                     style={{
                       background: palette.sky,
                       color: "#fff",
@@ -613,9 +700,30 @@ function VaultShell() {
                 {(activeProject.sessions || []).map((session) => (
                   <div key={session.id} className="mb-12">
                     <div className="flex justify-between items-baseline pb-2 mb-4">
-                      <h3 className="text-sm font-semibold" style={{ fontFamily: headerFont }}>
-                        {session.title}
-                      </h3>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <h3 className="text-sm font-semibold truncate" style={{ fontFamily: headerFont }}>
+                          {session.title}
+                        </h3>
+                        <button
+                          onClick={() => {
+                            if (!activeProject) return;
+                            if (confirm(`Delete "${session.title}" and all its photos?`)) {
+                              deleteSession?.(activeProject.id, session.id);
+                            }
+                          }}
+                          className="w-8 h-8 rounded-[8px] inline-flex items-center justify-center"
+                          style={{
+                            background: "rgba(255,255,255,0.70)",
+                            border: "1px solid rgba(0,0,0,0.10)",
+                            color: "rgba(220,38,38,0.95)",
+                          }}
+                          title="Delete session"
+                          aria-label="Delete session"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+
                       <p className="text-xs text-black/40">{session.date}</p>
                     </div>
 
@@ -663,6 +771,28 @@ function VaultShell() {
                     </button>
                   </div>
 
+                  <div className="hidden sm:flex items-center gap-2">
+                    <button
+                      onClick={goPrevMedia}
+                      disabled={currentMediaIndex <= 0}
+                      className="h-10 px-3 rounded-full bg-black/35 backdrop-blur-md border border-white/10 text-white flex items-center gap-2 hover:bg-black/55 transition-colors duration-200 ease-out disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label="Previous photo"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      <span className="text-xs font-semibold">Prev</span>
+                    </button>
+
+                    <button
+                      onClick={goNextMedia}
+                      disabled={currentMediaIndex < 0 || currentMediaIndex >= sessionMediaList.length - 1}
+                      className="h-10 px-3 rounded-full bg-black/35 backdrop-blur-md border border-white/10 text-white flex items-center gap-2 hover:bg-black/55 transition-colors duration-200 ease-out disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label="Next photo"
+                    >
+                      <span className="text-xs font-semibold">Next</span>
+                      <ChevronLeft className="w-4 h-4 rotate-180" />
+                    </button>
+                  </div>
+
                   <button
                     onClick={handleDeleteCurrentMedia}
                     className="w-10 h-10 rounded-full bg-black/35 backdrop-blur-md border border-white/10 text-red-200 flex items-center justify-center hover:bg-black/55 hover:text-red-100 transition-colors duration-200 ease-out"
@@ -686,9 +816,10 @@ function VaultShell() {
                       isAddPinMode && !isFocusMode ? "cursor-crosshair" : ""
                     }`}
                     onClick={handleStageClickToAddPin}
+                    onPointerDown={onStagePointerDown}
                     onPointerMove={onStagePointerMove}
-                    onPointerUp={onStagePointerUp}
-                    onPointerLeave={onStagePointerUp}
+                    onPointerUp={(e) => { onStagePointerUp(e); onStagePointerEnd(e); }}
+                    onPointerLeave={(e) => { onStagePointerUp(e); onStagePointerEnd(e); }}
                   >
                     <img
                       src={currentMedia.url}
@@ -793,7 +924,7 @@ function VaultShell() {
                       className="w-full px-4 pb-4 sm:px-6"
                       style={{
                         background:
-                          "linear-gradient(180deg, rgba(0,0,0,0.00) 0%, rgba(0,0,0,0.18) 20%, rgba(0,0,0,0.38) 100%)",
+                          "linear-gradient(180deg, rgba(255,254,250,0.00) 0%, rgba(255,254,250,0.65) 22%, rgba(255,254,250,0.92) 100%)",
                       }}
                     >
                       <div
@@ -1072,11 +1203,13 @@ function VaultShell() {
             <NewProjectModal open={newOpen} onClose={() => setNewOpen(false)} onCreate={handleCreateProject} />
             <AddMediaModal
               isOpen={mediaOpen}
-              onClose={() => setMediaOpen(false)}
+              onClose={() => { setMediaOpen(false); setAutoPromptMediaPicker(false); }}
               project={activeProject}
               onAddMedia={handleAddMedia}
               mode="upload"
               existingSessions={activeProject?.sessions || []}
+              autoPrompt={autoPromptMediaPicker}
+              autoSubmit={autoPromptMediaPicker}
             />
           </div>
         </div>

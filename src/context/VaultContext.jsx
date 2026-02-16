@@ -11,7 +11,7 @@ import {
   getDoc,
   deleteDoc,
 } from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { auth, db, storage } from "../lib/firebase";
 
@@ -183,7 +183,46 @@ export function VaultProvider({ children }) {
   };
 
   // Pins: add
-  const addHotspotToMedia = async (projectId, sessionId, mediaId, hotspotData) => {
+  
+
+  // --- Sessions ---
+  const deleteSession = async (projectId, sessionId) => {
+    if (!user || !projectId || !sessionId) return;
+    const projectRef = doc(db, "projects", projectId);
+    const snap = await getDoc(projectRef);
+    if (!snap.exists()) return;
+
+    const data = snap.data();
+    const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+    const nextSessions = sessions.filter((s) => s.id !== sessionId);
+
+    await updateDoc(projectRef, { sessions: nextSessions });
+
+    // Keep UI consistent
+    if (activeProject?.id === projectId) {
+      setActiveProject((p) => (p ? { ...p, sessions: nextSessions } : p));
+      // If you were viewing media from that session, bail out
+      if (activeMedia?.sessionId === sessionId) {
+        setActiveMedia(null);
+        setView("project");
+      }
+    }
+  };
+
+  // --- Auth actions ---
+  const signOutUser = async () => {
+    try {
+      await signOut(auth);
+    } finally {
+      // Clear local UI immediately (auth listener will also run)
+      setView("dashboard");
+      setTab("library");
+      setActiveProject(null);
+      setActiveMedia(null);
+      setSearch("");
+    }
+  };
+const addHotspotToMedia = async (projectId, sessionId, mediaId, hotspotData) => {
     if (!user || !projectId || !sessionId || !mediaId) return;
 
     const projectRef = doc(db, "projects", projectId);
@@ -305,6 +344,7 @@ export function VaultProvider({ children }) {
   const value = {
     user,
     authReady,
+    signOutUser,
 
     view,
     setView,
@@ -321,6 +361,7 @@ export function VaultProvider({ children }) {
 
     addProject,
     deleteProject,
+    deleteSession,
     addMediaToProject,
     deleteMediaFromProject,
 
