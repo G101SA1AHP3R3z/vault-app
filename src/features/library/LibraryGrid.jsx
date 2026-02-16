@@ -1,3 +1,4 @@
+
 import React from "react";
 import { Camera, Sparkles } from "lucide-react";
 import { useVault } from "../../context/VaultContext";

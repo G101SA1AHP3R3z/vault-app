@@ -384,7 +384,7 @@ export default function AddMediaModal({
           </button>
 
           <button
-            onClick={handleSubmit}
+onClick={() => handleSubmit()}
             disabled={!selectedFile || isSaving}
             className="flex-[2] h-11 text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
