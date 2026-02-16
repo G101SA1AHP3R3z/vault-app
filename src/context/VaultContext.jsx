@@ -17,7 +17,7 @@ import {
   arrayUnion,
 } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { auth, db, storage } from "../lib/firebase";
 
 const VaultContext = createContext(null);
@@ -59,6 +59,95 @@ export function VaultProvider({ children }) {
   const [search, setSearch] = useState("");
 
   const [projects, setProjects] = useState([]);
+  const deleteProjectDeep = async (projectId) => {
+  if (!user?.uid || !projectId) return;
+
+  const proj = projects.find((p) => p.id === projectId) || activeProject;
+  if (proj && !isOwner(proj)) {
+    throw new Error("Only the owner can delete this project.");
+  }
+
+  // Pull freshest version (avoid stale state)
+  const projectRef = doc(db, "projects", projectId);
+  const snap = await getDoc(projectRef);
+  if (!snap.exists()) return;
+
+  const data = snap.data();
+  const sessions = safeArray(data.sessions);
+
+  // Collect storage paths
+  const paths = [];
+  sessions.forEach((s) => {
+    safeArray(s.media).forEach((m) => {
+      if (m?.path) paths.push(m.path);
+    });
+  });
+
+  // Delete storage objects (best-effort)
+  await Promise.allSettled(
+    paths.map((p) => deleteObject(storageRef(storage, p)))
+  );
+
+  // Delete Firestore doc last
+  await deleteDoc(projectRef);
+
+  if (activeProject?.id === projectId) {
+    setActiveProject(null);
+    setActiveMedia(null);
+    setView("dashboard");
+  }
+};
+
+// Bulk delete multiple projects (deep)
+const bulkDeleteProjects = async (projectIds = []) => {
+  if (!user?.uid) return;
+  const ids = safeArray(projectIds).filter(Boolean);
+  for (const id of ids) {
+    await deleteProjectDeep(id);
+  }
+};
+
+// Bulk delete selected photos inside ONE project/session
+const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) => {
+  if (!user?.uid || !projectId || !sessionId) return;
+
+  const proj = projects.find((p) => p.id === projectId) || activeProject;
+  if (proj && !canEdit(proj)) {
+    throw new Error("You don’t have edit access to this project.");
+  }
+
+  const projectRef = doc(db, "projects", projectId);
+  const snap = await getDoc(projectRef);
+  if (!snap.exists()) return;
+
+  const data = snap.data();
+  const idSet = new Set(safeArray(mediaIds));
+
+  // Collect paths to delete
+  const paths = [];
+  safeArray(data.sessions).forEach((s) => {
+    if (s.id !== sessionId) return;
+    safeArray(s.media).forEach((m) => {
+      if (idSet.has(m.id) && m?.path) paths.push(m.path);
+    });
+  });
+
+  // Remove from sessions array
+  const sessions = safeArray(data.sessions).map((s) => {
+    if (s.id !== sessionId) return s;
+    const nextMedia = safeArray(s.media).filter((m) => !idSet.has(m.id));
+    return { ...s, media: nextMedia };
+  });
+
+  await updateDoc(projectRef, { sessions });
+
+  // Delete storage objects after doc update (best-effort)
+  await Promise.allSettled(paths.map((p) => deleteObject(storageRef(storage, p))));
+
+  if (activeProject?.id === projectId) {
+    setActiveProject((p) => (p ? { ...p, sessions } : p));
+  }
+};
 
   // -----------------------------
   // Auth
@@ -687,6 +776,9 @@ export function VaultProvider({ children }) {
     setActiveMedia,
     search,
     setSearch,
+    deleteProjectDeep,
+    bulkDeleteProjects,
+    bulkDeleteMediaFromSession,
 
     filteredProjects,
 
