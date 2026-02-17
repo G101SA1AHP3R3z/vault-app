@@ -667,21 +667,26 @@ export default function MediaViewer({
               )}
 
               {/* Add-pin hint */}
-              {isAddPinMode && !isFocusMode && (
-                <div className="absolute top-6 left-1/2 -translate-x-1/2 text-center pointer-events-none z-50">
-                  <span
-                    className="inline-block text-[10px] font-semibold uppercase tracking-widest px-4 py-2 rounded-full"
-                    style={{
-                      background: "rgba(255,255,255,0.92)",
-                      color: palette.ink,
-                      border: "1px solid rgba(0,0,0,0.10)",
-                    }}
-                  >
-                    Tap anywhere to drop a pin
-                  </span>
-                </div>
-              )}
-            </div>
+                          </div>
+{isAddPinMode && !isFocusMode && (
+  <div
+    className="px-4 pt-3"
+    style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}
+  >
+    <div
+      className="text-[10px] font-semibold uppercase tracking-widest text-center"
+      style={{
+        color: "rgba(0,0,0,0.55)",
+        background: "rgba(255,255,255,0.70)",
+        border: "1px solid rgba(0,0,0,0.10)",
+        borderRadius: 999,
+        padding: "10px 12px",
+      }}
+    >
+      Tap anywhere on the photo to drop a pin
+    </div>
+  </div>
+)}
 
             {/* Action row (main Add Pin lives here — no duplicate in notes when embedded) */}
             <div
