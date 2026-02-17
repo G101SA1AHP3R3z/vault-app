@@ -310,6 +310,7 @@ function VaultShell() {
     addProject,
     renameProject,
     addMediaToProject,
+    addMediaFilesToProject,
     deleteProject,
     renameSession,
     deleteSession,
@@ -492,17 +493,28 @@ function VaultShell() {
     }
   };
 
-  const handleAddMedia = async ({ file, sessionId, sessionTitle }) => {
-    if (!activeProject) return;
-    try {
-      await addMediaToProject(activeProject.id, file, sessionId, sessionTitle);
-      setMediaOpen(false);
-      setAutoPromptMediaPicker(false);
-      // keep selection stable; if none existed, it'll init on next effect
-    } catch (e) {
-      console.error("Media upload failed", e);
+const handleAddMedia = async ({ files, sessionId, sessionTitle }) => {
+  if (!activeProject) return;
+  try {
+    // preferred: one session, up to 5 files, single write to Firestore
+    if (addMediaFilesToProject) {
+      await addMediaFilesToProject(activeProject.id, files, sessionId, sessionTitle);
+    } else {
+      // fallback (older context): sequential single uploads (will create multiple sessions if sessionId is null)
+      for (const f of (files || []).slice(0, 5)) {
+        // eslint-disable-next-line no-await-in-loop
+        await addMediaToProject(activeProject.id, f, sessionId, sessionTitle);
+      }
     }
-  };
+
+    setMediaOpen(false);
+    setAutoPromptMediaPicker(false);
+  } catch (e) {
+    console.error("Media upload failed", e);
+    alert(e?.message || "Upload failed. Check console.");
+  }
+};
+
 
   const handleDeleteProject = async () => {
     if (!activeProject) return;
