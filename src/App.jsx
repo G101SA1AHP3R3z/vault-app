@@ -434,6 +434,24 @@ function VaultShell() {
     if (selectedIndex < 0) return null;
     return flatMedia[selectedIndex] || null;
   }, [flatMedia, selectedIndex]);
+  // Preload adjacent images so swiping feels instant (no blank while decoding)
+  useEffect(() => {
+    if (selectedIndex < 0) return;
+
+    const preload = (url) => {
+      if (!url) return;
+      const img = new Image();
+      img.decoding = "async";
+      img.src = url;
+    };
+
+    // prefetch prev + next couple
+    const offsets = [-1, 1, 2];
+    for (const off of offsets) {
+      const m = flatMedia[selectedIndex + off];
+      if (m?.url) preload(m.url);
+    }
+  }, [selectedIndex, flatMedia]);
 
   const setSelectedByIndex = (idx) => {
     if (idx < 0 || idx >= flatMedia.length) return;

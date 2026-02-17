@@ -1,5 +1,5 @@
 // /src/features/media/MediaViewer.jsx
-import React, { useMemo, useRef, useState, useEffect } from "react";
+import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import {
   ChevronLeft,
   Trash2,
@@ -30,6 +30,10 @@ function clamp01(n) {
  * Swipe:
  *  - Horizontal: prev/next (onPrev/onNext)
  *  - Vertical (down): onSwipeDown()
+ *
+ * Smoothness:
+ *  - Crossfade between images so swipe doesn't “blank” while loading/decoding
+ *  - When entering Add Pin mode, auto-scroll image into view (prevents ugly “collapsed” interim state)
  */
 export default function MediaViewer({
   mode = "modal",
@@ -43,7 +47,6 @@ export default function MediaViewer({
   onPrev,
   onNext,
   onDeleteMedia,
-
   onSwipeDown,
 
   // Pin CRUD
@@ -84,6 +87,65 @@ export default function MediaViewer({
   // Swipe nav
   const swipeRef = useRef({ down: false, x0: 0, y0: 0 });
 
+  // -----------------------------
+  // Smooth image swap (crossfade)
+  // -----------------------------
+  const [displaySrc, setDisplaySrc] = useState(media?.url || "");
+  const [nextSrc, setNextSrc] = useState(null);
+  const [nextLoaded, setNextLoaded] = useState(false);
+
+  useEffect(() => {
+    const url = media?.url || "";
+    if (!url) {
+      setDisplaySrc("");
+      setNextSrc(null);
+      setNextLoaded(false);
+      return;
+    }
+
+    // first mount or same url → set directly
+    if (!displaySrc) {
+      setDisplaySrc(url);
+      setNextSrc(null);
+      setNextLoaded(false);
+      return;
+    }
+    if (url === displaySrc) {
+      setNextSrc(null);
+      setNextLoaded(false);
+      return;
+    }
+
+    // start loading next image; keep old visible until loaded
+    setNextSrc(url);
+    setNextLoaded(false);
+
+    const img = new Image();
+    img.decoding = "async";
+    img.src = url;
+    img.onload = () => setNextLoaded(true);
+    img.onerror = () => {
+      // if it errors, just try to swap so user isn't stuck
+      setNextLoaded(true);
+    };
+
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [media?.url]);
+
+  const finalizeSwap = useCallback(() => {
+    if (!nextSrc) return;
+    setDisplaySrc(nextSrc);
+    setNextSrc(null);
+    setNextLoaded(false);
+  }, [nextSrc]);
+
+  // -----------------------------
+  // Pins + selection
+  // -----------------------------
   const currentHotspots = Array.isArray(media?.hotspots) ? media.hotspots : [];
 
   const selectedPin = useMemo(() => {
@@ -299,7 +361,9 @@ export default function MediaViewer({
     }
   };
 
+  // -----------------------------
   // Swipe: horizontal = prev/next, vertical down = close-to-grid
+  // -----------------------------
   const onStagePointerDown = (e) => {
     if (isAddPinMode) return;
     const x = e.clientX ?? e.touches?.[0]?.clientX;
@@ -339,6 +403,26 @@ export default function MediaViewer({
   const canPrev = mediaIndex > 0;
   const canNext = mediaIndex < Math.max(0, mediaCount - 1);
 
+  // -----------------------------
+  // Add-pin toggle (auto-scroll)
+  // -----------------------------
+  const toggleAddPin = () => {
+    if (isFocusMode) return;
+
+    setIsAddPinMode((v) => {
+      const next = !v;
+
+      // When entering add-pin mode, bring the image back into view to avoid the “collapsed” looking state
+      if (next && isEmbedded) {
+        requestAnimationFrame(() => {
+          stageRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+        });
+      }
+
+      return next;
+    });
+  };
+
   const Outer = ({ children }) => {
     if (isEmbedded) return <div className="w-full">{children}</div>;
 
@@ -362,7 +446,7 @@ export default function MediaViewer({
                 setSelectedPinId(null);
                 onBack?.();
               }}
-              className="w-10 h-10 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
+              className="w-10 h-10 rounded-full bg-white/80 border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
               aria-label="Back"
             >
               <ChevronLeft className="w-6 h-6" />
@@ -375,7 +459,7 @@ export default function MediaViewer({
                 setIsAddPinMode(false);
                 if (next) setSelectedPinId(null);
               }}
-              className="h-10 px-3 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out"
+              className="h-10 px-3 rounded-full bg-white/80 border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out"
               aria-label="Focus"
             >
               {isFocusMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -387,7 +471,7 @@ export default function MediaViewer({
             <button
               onClick={onPrev}
               disabled={!canPrev}
-              className="h-10 px-3 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out disabled:opacity-40 disabled:cursor-not-allowed"
+              className="h-10 px-3 rounded-full bg-white/80 border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out disabled:opacity-40 disabled:cursor-not-allowed"
               aria-label="Previous photo"
             >
               <ChevronLeft className="w-4 h-4" />
@@ -397,7 +481,7 @@ export default function MediaViewer({
             <button
               onClick={onNext}
               disabled={!canNext}
-              className="h-10 px-3 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out disabled:opacity-40 disabled:cursor-not-allowed"
+              className="h-10 px-3 rounded-full bg-white/80 border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out disabled:opacity-40 disabled:cursor-not-allowed"
               aria-label="Next photo"
             >
               <span className="text-xs font-semibold">Next</span>
@@ -407,7 +491,7 @@ export default function MediaViewer({
 
           <div className="flex items-center gap-2">
             <button
-              className="w-10 h-10 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
+              className="w-10 h-10 rounded-full bg-white/80 border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
               aria-label="Save"
               title="Save"
               onClick={() => alert("Wire save later.")}
@@ -416,7 +500,7 @@ export default function MediaViewer({
             </button>
 
             <button
-              className="w-10 h-10 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
+              className="w-10 h-10 rounded-full bg-white/80 border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
               aria-label="Share"
               title="Share"
               onClick={() => alert("Wire share later.")}
@@ -426,7 +510,7 @@ export default function MediaViewer({
 
             <button
               onClick={onDeleteMedia}
-              className="w-10 h-10 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-red-600 flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
+              className="w-10 h-10 rounded-full bg-white/80 border border-black/10 text-red-600 flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
               aria-label="Delete"
             >
               <Trash2 className="w-5 h-5" />
@@ -475,20 +559,41 @@ export default function MediaViewer({
               onTouchStart={onStagePointerDown}
               onTouchEnd={onStagePointerEnd}
             >
+              {/* Base image (stays visible) */}
               <img
-                src={media?.url}
+                src={displaySrc || media?.url || ""}
                 decoding="async"
-                loading="lazy"
-                className={`w-full object-contain transition-opacity duration-200 ease-out ${
-                  isAddPinMode ? "opacity-85" : "opacity-100"
-                }`}
+                loading="eager"
+                className="w-full object-contain"
                 style={{
                   pointerEvents: "none",
                   maxHeight: isEmbedded ? "60vh" : "72vh",
+                  opacity: nextSrc ? 1 : 1,
                 }}
                 alt=""
                 draggable={false}
               />
+
+              {/* Overlay image (crossfades in once loaded) */}
+              {nextSrc ? (
+                <img
+                  src={nextSrc}
+                  decoding="async"
+                  loading="eager"
+                  className="absolute inset-0 w-full h-full object-contain transition-opacity duration-200 ease-out"
+                  style={{
+                    pointerEvents: "none",
+                    opacity: nextLoaded ? 1 : 0,
+                    maxHeight: isEmbedded ? "60vh" : "72vh",
+                  }}
+                  alt=""
+                  draggable={false}
+                  onTransitionEnd={() => {
+                    // once fully visible, commit it as base
+                    if (nextLoaded) finalizeSwap();
+                  }}
+                />
+              ) : null}
 
               {/* Pins */}
               {!isFocusMode &&
@@ -553,7 +658,6 @@ export default function MediaViewer({
                       background: isHoveringTrash ? "rgba(220,38,38,0.95)" : "rgba(0,0,0,0.55)",
                       border: "1px solid rgba(255,255,255,0.16)",
                       color: isHoveringTrash ? "#fff" : "rgba(255,200,200,0.95)",
-                      backdropFilter: "blur(12px)",
                       transform: isHoveringTrash ? "scale(1.08)" : "scale(1)",
                     }}
                   >
@@ -571,7 +675,6 @@ export default function MediaViewer({
                       background: "rgba(255,255,255,0.92)",
                       color: palette.ink,
                       border: "1px solid rgba(0,0,0,0.10)",
-                      backdropFilter: "blur(14px)",
                     }}
                   >
                     Tap anywhere to drop a pin
@@ -580,7 +683,7 @@ export default function MediaViewer({
               )}
             </div>
 
-            {/* Action row */}
+            {/* Action row (main Add Pin lives here — no duplicate in notes when embedded) */}
             <div
               className="px-4 py-3 flex items-center justify-between"
               style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}
@@ -600,7 +703,7 @@ export default function MediaViewer({
               </div>
 
               <button
-                onClick={() => setIsAddPinMode((v) => !v)}
+                onClick={toggleAddPin}
                 className="h-10 px-4 rounded-full inline-flex items-center gap-2 transition-transform duration-200 ease-out active:scale-[0.98]"
                 style={{
                   background: isAddPinMode ? palette.sun : "rgba(0,0,0,0.04)",
@@ -618,7 +721,7 @@ export default function MediaViewer({
           </div>
         </div>
 
-        {/* NOTES PANEL (embedded shows it too; focus hides it) */}
+        {/* NOTES PANEL */}
         {!isFocusMode && (
           <div className={isEmbedded ? "mt-3" : "w-full px-4 pb-4 sm:px-6"}>
             <div
@@ -642,9 +745,9 @@ export default function MediaViewer({
                   </div>
                 </div>
 
+                {/* Embedded: show only Focus here (Add Pin button removed to prevent “collapsed interim” UI) */}
                 <div className="flex items-center gap-2">
-                  {/* Focus toggle inside embedded */}
-                  {isEmbedded && (
+                  {isEmbedded ? (
                     <button
                       onClick={() => {
                         const next = !isFocusMode;
@@ -654,7 +757,7 @@ export default function MediaViewer({
                       }}
                       className="h-9 px-3 rounded-[8px] inline-flex items-center gap-2"
                       style={{
-                        background: "rgba(255,255,255,0.70)",
+                        background: "rgba(255,255,255,0.78)",
                         border: "1px solid rgba(0,0,0,0.10)",
                         color: "rgba(0,0,0,0.78)",
                       }}
@@ -664,22 +767,7 @@ export default function MediaViewer({
                       {isFocusMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                       <span className="text-xs font-semibold">{isFocusMode ? "Exit" : "Focus"}</span>
                     </button>
-                  )}
-
-                  <button
-                    onClick={() => setIsAddPinMode((v) => !v)}
-                    className="h-9 px-3 rounded-[8px] inline-flex items-center gap-2 transition-transform duration-200 ease-out active:scale-[0.98]"
-                    style={{
-                      background: isAddPinMode ? palette.sun : "rgba(255,255,255,0.70)",
-                      color: palette.ink,
-                      border: "1px solid rgba(0,0,0,0.10)",
-                    }}
-                    aria-label="Add pin"
-                    title="Add pin"
-                  >
-                    <MapPin className="w-4 h-4" />
-                    <span className="text-xs font-semibold">{isAddPinMode ? "Cancel" : "Add Pin"}</span>
-                  </button>
+                  ) : null}
                 </div>
               </div>
 
