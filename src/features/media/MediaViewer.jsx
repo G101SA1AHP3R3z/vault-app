@@ -1,5 +1,5 @@
 // /src/features/media/MediaViewer.jsx
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState, useEffect } from "react";
 import {
   ChevronLeft,
   Trash2,
@@ -23,10 +23,16 @@ function clamp01(n) {
 
 /**
  * MediaViewer
- * - Fully owns "media view" UI state: focus mode, pin mode, selected pin, drag, pin editor modal, swipe
- * - You pass in project/media + pin CRUD callbacks from App (or from context).
+ * mode:
+ *  - "modal" (default): fixed fullscreen viewer
+ *  - "embedded": renders as a normal block (no fixed overlay). Used inside Project view.
+ *
+ * Swipe:
+ *  - Horizontal: prev/next (onPrev/onNext)
+ *  - Vertical (down): onSwipeDown()
  */
 export default function MediaViewer({
+  mode = "modal",
   project,
   media, // expects { id, url, sessionId, hotspots: [] }
   headerFont,
@@ -38,11 +44,15 @@ export default function MediaViewer({
   onNext,
   onDeleteMedia,
 
-  // Pin CRUD (wire to VaultContext functions)
+  onSwipeDown,
+
+  // Pin CRUD
   onAddHotspot,
   onUpdateHotspot,
   onDeleteHotspot,
 }) {
+  const isEmbedded = mode === "embedded";
+
   // Pins
   const [isAddPinMode, setIsAddPinMode] = useState(false);
   const [selectedPinId, setSelectedPinId] = useState(null);
@@ -81,6 +91,16 @@ export default function MediaViewer({
     const found = selectedPinId ? currentHotspots.find((h) => h.id === selectedPinId) : null;
     return found || currentHotspots[0] || null;
   }, [currentHotspots, selectedPinId]);
+
+  // Reset modes when media changes
+  useEffect(() => {
+    setIsAddPinMode(false);
+    setIsFocusMode(false);
+    setSelectedPinId(null);
+    setDraggingPinId(null);
+    setOptimisticPin(null);
+    setIsHoveringTrash(false);
+  }, [media?.id]);
 
   const openPinEditor = (hotspot) => {
     if (!hotspot?.id) return;
@@ -259,7 +279,7 @@ export default function MediaViewer({
       try {
         await onDeleteHotspot?.(project.id, media.sessionId, media.id, hotspotId);
       } catch (err) {
-        console.error("Failed to incinerate pin:", err);
+        console.error("Failed to delete pin:", err);
       }
       return;
     }
@@ -279,10 +299,7 @@ export default function MediaViewer({
     }
   };
 
-  // Swipe handling (mobile-first)
-  // - Allow swipe in focus mode too.
-  // - Keep disabled while adding pins.
-  // - Stage uses touchAction: pan-y, and the image is pointerEvents:none.
+  // Swipe: horizontal = prev/next, vertical down = close-to-grid
   const onStagePointerDown = (e) => {
     if (isAddPinMode) return;
     const x = e.clientX ?? e.touches?.[0]?.clientX;
@@ -306,7 +323,13 @@ export default function MediaViewer({
     const dx = x - swipeRef.current.x0;
     const dy = y - swipeRef.current.y0;
 
-    // Require clear horizontal intent
+    // Down swipe → close to grid (Pinterest)
+    if (dy > 90 && Math.abs(dy) > Math.abs(dx) * 1.25) {
+      onSwipeDown?.();
+      return;
+    }
+
+    // Horizontal swipe → next/prev
     if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.25) {
       if (dx < 0) onNext?.();
       else onPrev?.();
@@ -316,107 +339,124 @@ export default function MediaViewer({
   const canPrev = mediaIndex > 0;
   const canNext = mediaIndex < Math.max(0, mediaCount - 1);
 
-  return (
-    <div className="fixed inset-0 z-[100]" style={{ background: "#F4F4F5" }}>
-      {/* Sticky top bar (Pinterest-like) */}
-      <div className="absolute top-0 inset-x-0 z-50 px-4 pt-4 pb-3 sm:px-6 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              setIsAddPinMode(false);
-              setIsFocusMode(false);
-              setSelectedPinId(null);
-              onBack?.();
-            }}
-            className="w-10 h-10 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
-            aria-label="Back"
-          >
-            <ChevronLeft className="w-6 h-6" />
-          </button>
+  const Outer = ({ children }) => {
+    if (isEmbedded) return <div className="w-full">{children}</div>;
 
-          <button
-            onClick={() => {
-              const next = !isFocusMode;
-              setIsFocusMode(next);
-              setIsAddPinMode(false);
-              if (next) setSelectedPinId(null);
-            }}
-            className="h-10 px-3 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out"
-            aria-label="Focus"
-          >
-            {isFocusMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-            <span className="text-xs font-semibold">{isFocusMode ? "Exit Focus" : "Focus"}</span>
-          </button>
-        </div>
-
-        <div className="hidden sm:flex items-center gap-2">
-          <button
-            onClick={onPrev}
-            disabled={!canPrev}
-            className="h-10 px-3 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out disabled:opacity-40 disabled:cursor-not-allowed"
-            aria-label="Previous photo"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            <span className="text-xs font-semibold">Prev</span>
-          </button>
-
-          <button
-            onClick={onNext}
-            disabled={!canNext}
-            className="h-10 px-3 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out disabled:opacity-40 disabled:cursor-not-allowed"
-            aria-label="Next photo"
-          >
-            <span className="text-xs font-semibold">Next</span>
-            <ChevronLeft className="w-4 h-4 rotate-180" />
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            className="w-10 h-10 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
-            aria-label="Save"
-            title="Save"
-            onClick={() => alert("Wire save later.")}
-          >
-            <Heart className="w-5 h-5" />
-          </button>
-
-          <button
-            className="w-10 h-10 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
-            aria-label="Share"
-            title="Share"
-            onClick={() => alert("Wire share later.")}
-          >
-            <Share2 className="w-5 h-5" />
-          </button>
-
-          <button
-            onClick={onDeleteMedia}
-            className="w-10 h-10 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-red-600 flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
-            aria-label="Delete"
-          >
-            <Trash2 className="w-5 h-5" />
-          </button>
-        </div>
+    return (
+      <div className="fixed inset-0 z-[100]" style={{ background: "#F4F4F5" }}>
+        {children}
       </div>
+    );
+  };
+
+  return (
+    <Outer>
+      {/* Top bar (only in modal mode) */}
+      {!isEmbedded && (
+        <div className="absolute top-0 inset-x-0 z-50 px-4 pt-4 pb-3 sm:px-6 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setIsAddPinMode(false);
+                setIsFocusMode(false);
+                setSelectedPinId(null);
+                onBack?.();
+              }}
+              className="w-10 h-10 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
+              aria-label="Back"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+
+            <button
+              onClick={() => {
+                const next = !isFocusMode;
+                setIsFocusMode(next);
+                setIsAddPinMode(false);
+                if (next) setSelectedPinId(null);
+              }}
+              className="h-10 px-3 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out"
+              aria-label="Focus"
+            >
+              {isFocusMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              <span className="text-xs font-semibold">{isFocusMode ? "Exit Focus" : "Focus"}</span>
+            </button>
+          </div>
+
+          <div className="hidden sm:flex items-center gap-2">
+            <button
+              onClick={onPrev}
+              disabled={!canPrev}
+              className="h-10 px-3 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Previous photo"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span className="text-xs font-semibold">Prev</span>
+            </button>
+
+            <button
+              onClick={onNext}
+              disabled={!canNext}
+              className="h-10 px-3 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Next photo"
+            >
+              <span className="text-xs font-semibold">Next</span>
+              <ChevronLeft className="w-4 h-4 rotate-180" />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              className="w-10 h-10 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
+              aria-label="Save"
+              title="Save"
+              onClick={() => alert("Wire save later.")}
+            >
+              <Heart className="w-5 h-5" />
+            </button>
+
+            <button
+              className="w-10 h-10 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
+              aria-label="Share"
+              title="Share"
+              onClick={() => alert("Wire share later.")}
+            >
+              <Share2 className="w-5 h-5" />
+            </button>
+
+            <button
+              onClick={onDeleteMedia}
+              className="w-10 h-10 rounded-full bg-white/80 backdrop-blur-md border border-black/10 text-red-600 flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
+              aria-label="Delete"
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       <div
-        className="h-full w-full grid"
-        style={{ gridTemplateRows: isFocusMode ? "1fr" : "minmax(0, 1fr) auto" }}
+        className={isEmbedded ? "w-full" : "h-full w-full grid"}
+        style={isEmbedded ? undefined : { gridTemplateRows: isFocusMode ? "1fr" : "minmax(0, 1fr) auto" }}
       >
         {/* IMAGE CARD */}
-        <div className="min-h-0 flex items-center justify-center px-4 pt-20 pb-6 sm:px-6">
+        <div
+          className={
+            isEmbedded
+              ? "w-full"
+              : "min-h-0 flex items-center justify-center px-4 pt-20 pb-6 sm:px-6"
+          }
+        >
           <div
-            className="w-full max-w-5xl"
+            className={isEmbedded ? "w-full" : "w-full max-w-5xl"}
             style={{
               borderRadius: 8,
-              background: "rgba(255,255,255,0.86)",
+              background: "rgba(255,255,255,0.92)",
               border: "1px solid rgba(0,0,0,0.08)",
               boxShadow: "0 26px 70px -56px rgba(0,0,0,0.55)",
               overflow: "hidden",
             }}
           >
-            {/* Stage is the relative area (pins live here) */}
             <div
               ref={stageRef}
               className={`relative w-full ${isAddPinMode && !isFocusMode ? "cursor-crosshair" : ""}`}
@@ -437,15 +477,20 @@ export default function MediaViewer({
             >
               <img
                 src={media?.url}
+                decoding="async"
+                loading="lazy"
                 className={`w-full object-contain transition-opacity duration-200 ease-out ${
                   isAddPinMode ? "opacity-85" : "opacity-100"
                 }`}
-                style={{ pointerEvents: "none", maxHeight: "72vh" }}
+                style={{
+                  pointerEvents: "none",
+                  maxHeight: isEmbedded ? "60vh" : "72vh",
+                }}
                 alt=""
                 draggable={false}
               />
 
-              {/* Pins (hidden in focus mode) */}
+              {/* Pins */}
               {!isFocusMode &&
                 currentHotspots.map((h, idx) => {
                   const displayX = optimisticPin?.id === h.id ? optimisticPin.x : h.x;
@@ -523,7 +568,7 @@ export default function MediaViewer({
                   <span
                     className="inline-block text-[10px] font-semibold uppercase tracking-widest px-4 py-2 rounded-full"
                     style={{
-                      background: "rgba(255,255,255,0.90)",
+                      background: "rgba(255,255,255,0.92)",
                       color: palette.ink,
                       border: "1px solid rgba(0,0,0,0.10)",
                       backdropFilter: "blur(14px)",
@@ -535,7 +580,7 @@ export default function MediaViewer({
               )}
             </div>
 
-            {/* Action row under the image (Pinterest vibe) */}
+            {/* Action row */}
             <div
               className="px-4 py-3 flex items-center justify-between"
               style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}
@@ -573,25 +618,19 @@ export default function MediaViewer({
           </div>
         </div>
 
-        {/* BOTTOM PANEL */}
+        {/* NOTES PANEL (embedded shows it too; focus hides it) */}
         {!isFocusMode && (
-          <div
-            className="w-full px-4 pb-4 sm:px-6"
-            style={{
-              background:
-                "linear-gradient(180deg, rgba(244,244,245,0.00) 0%, rgba(244,244,245,0.72) 22%, rgba(244,244,245,0.96) 100%)",
-            }}
-          >
+          <div className={isEmbedded ? "mt-3" : "w-full px-4 pb-4 sm:px-6"}>
             <div
-              className="mx-auto max-w-6xl rounded-[14px] overflow-hidden"
+              className={isEmbedded ? "w-full" : "mx-auto max-w-6xl"}
               style={{
-                background: "rgba(255,255,255,0.82)",
+                borderRadius: 8,
+                background: "rgba(255,255,255,0.88)",
                 border: "1px solid rgba(0,0,0,0.10)",
-                backdropFilter: "blur(18px)",
                 boxShadow: "0 22px 60px -52px rgba(0,0,0,0.55)",
+                overflow: "hidden",
               }}
             >
-              {/* Panel header row */}
               <div
                 className="px-4 py-3 flex items-center justify-between"
                 style={{ borderBottom: "1px solid rgba(0,0,0,0.08)" }}
@@ -603,25 +642,49 @@ export default function MediaViewer({
                   </div>
                 </div>
 
-                {/* (Keep add pin here too for mobile quick access) */}
-                <button
-                  onClick={() => setIsAddPinMode((v) => !v)}
-                  className="h-9 px-3 rounded-[8px] inline-flex items-center gap-2 transition-transform duration-200 ease-out active:scale-[0.98]"
-                  style={{
-                    background: isAddPinMode ? palette.sun : "rgba(255,255,255,0.70)",
-                    color: palette.ink,
-                    border: "1px solid rgba(0,0,0,0.10)",
-                  }}
-                  aria-label="Add pin"
-                  title="Add pin"
-                >
-                  <MapPin className="w-4 h-4" />
-                  <span className="text-xs font-semibold">{isAddPinMode ? "Cancel" : "Add Pin"}</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  {/* Focus toggle inside embedded */}
+                  {isEmbedded && (
+                    <button
+                      onClick={() => {
+                        const next = !isFocusMode;
+                        setIsFocusMode(next);
+                        setIsAddPinMode(false);
+                        if (next) setSelectedPinId(null);
+                      }}
+                      className="h-9 px-3 rounded-[8px] inline-flex items-center gap-2"
+                      style={{
+                        background: "rgba(255,255,255,0.70)",
+                        border: "1px solid rgba(0,0,0,0.10)",
+                        color: "rgba(0,0,0,0.78)",
+                      }}
+                      aria-label="Focus"
+                      title="Focus"
+                    >
+                      {isFocusMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                      <span className="text-xs font-semibold">{isFocusMode ? "Exit" : "Focus"}</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => setIsAddPinMode((v) => !v)}
+                    className="h-9 px-3 rounded-[8px] inline-flex items-center gap-2 transition-transform duration-200 ease-out active:scale-[0.98]"
+                    style={{
+                      background: isAddPinMode ? palette.sun : "rgba(255,255,255,0.70)",
+                      color: palette.ink,
+                      border: "1px solid rgba(0,0,0,0.10)",
+                    }}
+                    aria-label="Add pin"
+                    title="Add pin"
+                  >
+                    <MapPin className="w-4 h-4" />
+                    <span className="text-xs font-semibold">{isAddPinMode ? "Cancel" : "Add Pin"}</span>
+                  </button>
+                </div>
               </div>
 
               <div className="p-4 sm:p-5 space-y-4">
-                {/* Photo notes (placeholder) */}
+                {/* Photo notes placeholder */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <div className="text-[11px] font-semibold uppercase tracking-widest text-black/45">
@@ -764,7 +827,7 @@ export default function MediaViewer({
         )}
       </div>
 
-      {/* Pin editor modal (MUST be inside the returned JSX) */}
+      {/* Pin editor modal */}
       {pinOpen && (
         <PinEditorModal
           open={pinOpen}
@@ -780,6 +843,6 @@ export default function MediaViewer({
           }}
         />
       )}
-    </div>
+    </Outer>
   );
 }

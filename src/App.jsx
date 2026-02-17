@@ -58,26 +58,19 @@ function TileButton({ variant = "primary", icon: Icon, children, style, ...props
     <button
       {...props}
       className={[
-        "h-11 px-4 rounded-[14px] inline-flex items-center gap-2",
+        "h-11 px-4 rounded-[8px] inline-flex items-center gap-2",
         "text-xs font-black uppercase tracking-[0.12em]",
         "active:scale-[0.985] transition-all duration-200 ease-out",
         "focus:outline-none focus:ring-2 focus:ring-black/10",
       ].join(" ")}
       style={{
-        background: isPrimary ? "#FFEA3A" : "rgba(255,255,255,0.70)",
+        background: isPrimary ? "#FFEA3A" : "rgba(255,255,255,0.78)",
         color: "rgba(0,0,0,0.82)",
         border: "1px solid rgba(0,0,0,0.10)",
         boxShadow: isPrimary
           ? "0 14px 30px -22px rgba(0,0,0,0.28)"
           : "0 14px 30px -30px rgba(0,0,0,0.20)",
-        backdropFilter: "blur(16px)",
         ...style,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.transform = "translateY(-1px)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = "translateY(0px)";
       }}
     >
       {Icon ? <Icon className="w-4 h-4" /> : null}
@@ -118,10 +111,9 @@ function ProfileMenu({ user, onSignOut, palette }) {
         }}
         className="w-10 h-10 rounded-full overflow-hidden flex items-center justify-center shrink-0"
         style={{
-          background: "rgba(255,255,255,0.70)",
+          background: "rgba(255,255,255,0.78)",
           border: `1px solid ${palette?.line || "rgba(0,0,0,0.10)"}`,
           boxShadow: "0 14px 30px -26px rgba(0,0,0,0.25)",
-          backdropFilter: "blur(16px)",
         }}
         title={name}
         aria-label="Profile"
@@ -139,10 +131,9 @@ function ProfileMenu({ user, onSignOut, palette }) {
         <div
           className="absolute right-0 mt-2 w-60 overflow-hidden z-50"
           style={{
-            borderRadius: 14,
-            background: "rgba(255,255,255,0.86)",
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.92)",
             border: `1px solid ${palette?.line || "rgba(0,0,0,0.10)"}`,
-            backdropFilter: "blur(18px)",
             boxShadow: "0 18px 45px -38px rgba(0,0,0,0.45)",
           }}
         >
@@ -200,12 +191,11 @@ function KebabMenu({ items = [], palette }) {
           e.stopPropagation();
           setOpen((v) => !v);
         }}
-        className="w-9 h-9 rounded-[10px] inline-flex items-center justify-center"
+        className="w-9 h-9 rounded-[8px] inline-flex items-center justify-center"
         style={{
-          background: "rgba(255,255,255,0.70)",
+          background: "rgba(255,255,255,0.78)",
           border: `1px solid ${palette?.line || "rgba(0,0,0,0.10)"}`,
           color: "rgba(0,0,0,0.70)",
-          backdropFilter: "blur(14px)",
         }}
         aria-label="More"
         title="More"
@@ -217,10 +207,9 @@ function KebabMenu({ items = [], palette }) {
         <div
           className="absolute right-0 mt-2 w-52 overflow-hidden z-50"
           style={{
-            borderRadius: 14,
-            background: "rgba(255,255,255,0.86)",
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.92)",
             border: `1px solid ${palette?.line || "rgba(0,0,0,0.10)"}`,
-            backdropFilter: "blur(18px)",
             boxShadow: "0 18px 45px -38px rgba(0,0,0,0.45)",
           }}
         >
@@ -256,29 +245,28 @@ function AbstractCreamBackdrop({ children }) {
   );
 
   return (
-<div className="min-h-screen relative" style={{ background: "#FFFEFA" }}>
+    <div className="min-h-screen relative" style={{ background: "#FFFEFA" }}>
       <div className="fixed inset-0 -z-10 overflow-hidden">
         <div
           className="absolute -top-28 -left-28 w-[520px] h-[520px] rounded-[48px] rotate-[18deg]"
-          style={{ background: palette.sun, opacity: 0.16 }}
+          style={{ background: palette.sun, opacity: 0.12 }}
         />
         <div
           className="absolute top-10 -right-64 w-[820px] h-[300px] rounded-[60px] rotate-[-12deg]"
-          style={{ background: palette.sky, opacity: 0.1 }}
+          style={{ background: palette.sky, opacity: 0.08 }}
         />
         <div
           className="absolute -bottom-44 left-16 w-[760px] h-[460px] rounded-[70px] rotate-[10deg]"
-          style={{ background: palette.breeze, opacity: 0.09 }}
+          style={{ background: palette.breeze, opacity: 0.07 }}
         />
-       <div
-  className="absolute inset-0"
-  style={{
-    background:
-      "linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.25) 40%, rgba(255,255,255,0.55) 100%)",
-    opacity: 0.55,
-  }}
-/>
-
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.25) 40%, rgba(255,255,255,0.55) 100%)",
+            opacity: 0.55,
+          }}
+        />
       </div>
 
       {children}
@@ -313,14 +301,11 @@ function VaultShell() {
     tab,
     setTab,
 
-    // search UI
     search,
     setSearch,
 
     activeProject,
     setActiveProject,
-    activeMedia,
-    setActiveMedia,
 
     addProject,
     renameProject,
@@ -342,7 +327,7 @@ function VaultShell() {
   const [mediaOpen, setMediaOpen] = useState(false);
   const [autoPromptMediaPicker, setAutoPromptMediaPicker] = useState(false);
 
-  // focus search input when Search tab opens
+  // Search focus
   const searchInputRef = useRef(null);
   useEffect(() => {
     if (view === "dashboard" && tab === "search") {
@@ -351,9 +336,7 @@ function VaultShell() {
     }
   }, [view, tab]);
 
-  // -----------------------------
-  // Multi-select (Apple-style)
-  // -----------------------------
+  // Multi-select (unchanged)
   const [selectMode, setSelectMode] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -383,7 +366,6 @@ function VaultShell() {
       enterSelect(sessionId, mediaId);
       return;
     }
-
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(mediaId)) next.delete(mediaId);
@@ -402,7 +384,6 @@ function VaultShell() {
     if (!confirm(`Delete ${selectedIds.size} item(s)?`)) return;
 
     const ids = Array.from(selectedIds);
-
     if (bulkDeleteMediaFromSession) {
       await bulkDeleteMediaFromSession(activeProject.id, selectedSessionId, ids);
     } else {
@@ -411,33 +392,83 @@ function VaultShell() {
         await deleteMediaFromProject(activeProject.id, selectedSessionId, id);
       }
     }
-
     exitSelect();
   };
 
-  // -----------------------------
-  // Navigation helpers
-  // -----------------------------
+  // Project media selection (Pinterest-style)
+  const [detailOpen, setDetailOpen] = useState(true);
+  const [selectedKey, setSelectedKey] = useState(null); // { sessionId, mediaId }
+  const gridTopRef = useRef(null);
+
+  // Flatten media in project order: session order, then media order
+  const flatMedia = useMemo(() => {
+    const sessions = Array.isArray(activeProject?.sessions) ? activeProject.sessions : [];
+    return sessions.flatMap((s) =>
+      (Array.isArray(s?.media) ? s.media : []).map((m) => ({ ...m, sessionId: s.id }))
+    );
+  }, [activeProject?.sessions]);
+
+  // Initialize selection when opening a project
+  useEffect(() => {
+    if (view !== "project" || !activeProject?.id) return;
+
+    // default pick: first media in project (if any)
+    const first = flatMedia[0] || null;
+    if (!first) {
+      setSelectedKey(null);
+      setDetailOpen(false);
+      return;
+    }
+
+    setSelectedKey((prev) => prev || { sessionId: first.sessionId, mediaId: first.id });
+    setDetailOpen(true);
+  }, [view, activeProject?.id, flatMedia]);
+
+  const selectedIndex = useMemo(() => {
+    if (!selectedKey) return -1;
+    return flatMedia.findIndex((m) => m.id === selectedKey.mediaId && m.sessionId === selectedKey.sessionId);
+  }, [flatMedia, selectedKey]);
+
+  const selectedMedia = useMemo(() => {
+    if (selectedIndex < 0) return null;
+    return flatMedia[selectedIndex] || null;
+  }, [flatMedia, selectedIndex]);
+
+  const setSelectedByIndex = (idx) => {
+    if (idx < 0 || idx >= flatMedia.length) return;
+    const m = flatMedia[idx];
+    setSelectedKey({ sessionId: m.sessionId, mediaId: m.id });
+    setDetailOpen(true);
+  };
+
+  const nextMedia = () => setSelectedByIndex(selectedIndex + 1);
+  const prevMedia = () => setSelectedByIndex(selectedIndex - 1);
+
+  const closeToGrid = () => {
+    setDetailOpen(false);
+    // snap to where the grid starts (feels like Pinterest)
+    requestAnimationFrame(() => {
+      gridTopRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  const openFromThumb = (sessionId, mediaId) => {
+    setSelectedKey({ sessionId, mediaId });
+    setDetailOpen(true);
+    // pull the detail card into view
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+  };
+
+  // Navigation
   const goBack = () => {
     if (selectMode) {
       exitSelect();
       return;
     }
-
-    if (view === "media") {
-      setView("project");
-      setActiveMedia(null);
-      return;
-    }
-
     setView("dashboard");
     setActiveProject(null);
-    setActiveMedia(null);
-  };
-
-  const navigateToMedia = (m, sessionId) => {
-    setActiveMedia({ ...m, sessionId });
-    setView("media");
+    setSelectedKey(null);
+    setDetailOpen(true);
   };
 
   const handleQuickAdd = (project) => {
@@ -446,7 +477,6 @@ function VaultShell() {
     setMediaOpen(true);
   };
 
-  // Create project + auto-open upload
   const handleCreateProject = async ({ title, tags, note }) => {
     try {
       const p = await addProject({ title, aiTags: tags, note });
@@ -468,6 +498,7 @@ function VaultShell() {
       await addMediaToProject(activeProject.id, file, sessionId, sessionTitle);
       setMediaOpen(false);
       setAutoPromptMediaPicker(false);
+      // keep selection stable; if none existed, it'll init on next effect
     } catch (e) {
       console.error("Media upload failed", e);
     }
@@ -533,52 +564,27 @@ function VaultShell() {
     }
   };
 
-  // -----------------------------
-  // Media (viewer helpers)
-  // -----------------------------
-  const currentSession = useMemo(() => {
-    if (!activeProject || !activeMedia?.sessionId) return null;
-    return (activeProject.sessions || []).find((s) => s.id === activeMedia.sessionId) || null;
-  }, [activeProject, activeMedia?.sessionId]);
-
-  const currentMedia = useMemo(() => {
-    if (!activeProject || !activeMedia?.id || !activeMedia?.sessionId) return null;
-    const s = (activeProject.sessions || []).find((ss) => ss.id === activeMedia.sessionId);
-    if (!s) return null;
-    const m = (s.media || []).find((mm) => mm.id === activeMedia.id);
-    if (!m) return null;
-    return { ...m, sessionId: s.id };
-  }, [activeProject, activeMedia?.id, activeMedia?.sessionId]);
-
-  const sessionMediaList = currentSession?.media || [];
-
-  const mediaIndex = useMemo(() => {
-    if (!currentMedia?.id) return 0;
-    const idx = sessionMediaList.findIndex((m) => m.id === currentMedia.id);
-    return Math.max(0, idx);
-  }, [sessionMediaList, currentMedia?.id]);
-
-  const goToMediaIndex = (idx) => {
-    if (!currentSession) return;
-    if (idx < 0 || idx >= sessionMediaList.length) return;
-    const m = sessionMediaList[idx];
-    setActiveMedia({ ...m, sessionId: currentSession.id });
-  };
-
-  const goPrev = () => goToMediaIndex(mediaIndex - 1);
-  const goNext = () => goToMediaIndex(mediaIndex + 1);
-
-  const handleDeleteCurrentMedia = async () => {
-    if (!activeProject || !activeMedia?.id || !activeMedia?.sessionId) return;
+  const handleDeleteSelectedMedia = async () => {
+    if (!activeProject?.id || !selectedMedia?.id || !selectedMedia?.sessionId) return;
     if (!confirm("Permanently delete this photo?")) return;
-    await deleteMediaFromProject(activeProject.id, activeMedia.sessionId, activeMedia.id);
-    setActiveMedia(null);
-    setView("project");
+
+    const deletedIndex = selectedIndex;
+
+    await deleteMediaFromProject(activeProject.id, selectedMedia.sessionId, selectedMedia.id);
+
+    // After delete: select next item if exists, else prev, else close detail
+    requestAnimationFrame(() => {
+      const next = flatMedia[deletedIndex + 1] || flatMedia[deletedIndex - 1] || null;
+      if (!next) {
+        setSelectedKey(null);
+        setDetailOpen(false);
+        return;
+      }
+      setSelectedKey({ sessionId: next.sessionId, mediaId: next.id });
+      setDetailOpen(true);
+    });
   };
 
-  // -----------------------------
-  // Render
-  // -----------------------------
   return (
     <AbstractCreamBackdrop>
       <div
@@ -591,17 +597,14 @@ function VaultShell() {
           <div
             className={`w-full ${view === "dashboard" ? "max-w-md" : "max-w-6xl"} min-h-screen relative border-x`}
             style={{
-  background: "rgba(255,254,250,0.96)", // warmer + no gray veil
-  borderColor: "rgba(0,0,0,0.08)",
-  // backdropFilter removed for performance
-  boxShadow: "0 18px 48px -44px rgba(0,0,0,0.28)",
-}}
-
+              background: "rgba(255,254,250,0.96)",
+              borderColor: "rgba(0,0,0,0.08)",
+              boxShadow: "0 18px 48px -44px rgba(0,0,0,0.28)",
+            }}
           >
             {/* DASHBOARD */}
             {view === "dashboard" && (
               <div className="p-5 transition-all duration-300 ease-out">
-                {/* Header: left add, center logo, right profile */}
                 <div className="relative pt-8 mb-2">
                   <div className="h-12 relative">
                     <div className="absolute inset-0 flex items-center justify-between">
@@ -629,7 +632,6 @@ function VaultShell() {
                     </div>
                   </div>
 
-                  {/* Smooth search bar reveal */}
                   <div
                     className="overflow-hidden transition-all duration-300 ease-out"
                     style={{
@@ -639,11 +641,10 @@ function VaultShell() {
                     }}
                   >
                     <div
-                      className="mt-3 px-4 py-3 rounded-[14px]"
+                      className="mt-3 px-4 py-3 rounded-[8px]"
                       style={{
-                        background: "rgba(255,255,255,0.72)",
+                        background: "rgba(255,255,255,0.82)",
                         border: `1px solid ${palette.line}`,
-                        backdropFilter: "blur(16px)",
                         boxShadow: "0 14px 30px -30px rgba(0,0,0,0.22)",
                       }}
                     >
@@ -669,17 +670,17 @@ function VaultShell() {
             {/* PROJECT VIEW */}
             {view === "project" && activeProject && (
               <>
-                {/* PROJECT HEADER (Pinterest-like pin view) */}
+                {/* Sticky header row */}
                 <div
                   className="px-4 pt-10 md:pt-12 pb-4 sticky top-0 z-40"
-                  style={{ background: "rgba(255,254,250,0.72)", backdropFilter: "blur(16px)" }}
+                  style={{ background: "rgba(255,254,250,0.90)" }}
                 >
                   <div className="max-w-5xl mx-auto flex items-center justify-between">
                     <button
                       onClick={selectMode ? exitSelect : goBack}
                       className="w-10 h-10 rounded-full inline-flex items-center justify-center"
                       style={{
-                        background: "rgba(255,255,255,0.82)",
+                        background: "rgba(255,255,255,0.90)",
                         border: `1px solid ${palette.line}`,
                         boxShadow: "0 18px 45px -40px rgba(0,0,0,0.35)",
                       }}
@@ -716,28 +717,8 @@ function VaultShell() {
 
                 <div className="px-4 pb-24 md:pb-28">
                   <div className="max-w-5xl mx-auto">
-                    {/* Hero media card */}
-                    {activeProject.coverPhoto ? (
-                      <div
-                        className="w-full overflow-hidden"
-                        style={{
-                          borderRadius: 8,
-                          background: "rgba(255,255,255,0.70)",
-                          border: `1px solid ${palette.line}`,
-                          boxShadow: "0 26px 70px -56px rgba(0,0,0,0.55)",
-                        }}
-                      >
-                        <img
-                          src={activeProject.coverPhoto}
-                          alt=""
-                          className="w-full object-cover"
-                          style={{ aspectRatio: "4 / 3" }}
-                          loading="lazy"
-                        />
-                      </div>
-                    ) : null}
-
-                    <div className="mt-5 flex items-start justify-between gap-3">
+                    {/* Title + meta */}
+                    <div className="mt-2 flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <h2
                           className="text-[26px] md:text-[34px] font-semibold tracking-[-0.02em] leading-tight"
@@ -754,7 +735,7 @@ function VaultShell() {
                         onClick={handleDeleteProject}
                         className="w-10 h-10 rounded-full inline-flex items-center justify-center"
                         style={{
-                          background: "rgba(255,255,255,0.82)",
+                          background: "rgba(255,255,255,0.90)",
                           border: `1px solid ${palette.line}`,
                           color: "#DC2626",
                         }}
@@ -766,13 +747,13 @@ function VaultShell() {
                     </div>
 
                     {/* Tags */}
-                    <div className="flex flex-wrap gap-2 mb-8 mt-6">
+                    <div className="flex flex-wrap gap-2 mb-6 mt-5">
                       {(activeProject.aiTags || []).map((tag) => (
                         <span
                           key={tag}
                           className="text-[11px] font-semibold px-3 py-1 rounded-[8px]"
                           style={{
-                            background: "rgba(255,255,255,0.55)",
+                            background: "rgba(255,255,255,0.70)",
                             border: "1px solid rgba(0,0,0,0.08)",
                             color: "rgba(0,0,0,0.55)",
                           }}
@@ -782,7 +763,32 @@ function VaultShell() {
                       ))}
                     </div>
 
-                    {/* Sessions (Pinterest "more to explore" vibe) */}
+                    {/* Embedded “selected photo” detail (Pinterest pin) */}
+                    {detailOpen && selectedMedia && (
+                      <div className="mb-8">
+                        <MediaViewer
+                          mode="embedded"
+                          project={activeProject}
+                          media={selectedMedia}
+                          headerFont={headerFont}
+                          palette={palette}
+                          mediaIndex={Math.max(0, selectedIndex)}
+                          mediaCount={flatMedia.length}
+                          onPrev={prevMedia}
+                          onNext={nextMedia}
+                          onSwipeDown={closeToGrid}
+                          onDeleteMedia={handleDeleteSelectedMedia}
+                          onAddHotspot={addHotspotToMedia}
+                          onUpdateHotspot={updateHotspotInMedia}
+                          onDeleteHotspot={deleteHotspotFromMedia}
+                        />
+                      </div>
+                    )}
+
+                    {/* Grid start target */}
+                    <div ref={gridTopRef} />
+
+                    {/* Sessions (Pinterest “more to explore” rails) */}
                     {(activeProject.sessions || []).map((session) => {
                       const inThisSession = selectMode && selectedSessionId === session.id;
 
@@ -819,7 +825,6 @@ function VaultShell() {
                             />
                           </div>
 
-                          {/* If selecting, grid is better; otherwise, horizontal rail like Pinterest */}
                           {inThisSession ? (
                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                               {(session.media || []).map((m) => {
@@ -847,7 +852,7 @@ function VaultShell() {
                                       item={m}
                                       variant="tall"
                                       onLongPress={() => enterSelect(session.id, m.id)}
-                                      onClick={() => navigateToMedia(m, session.id)}
+                                      onClick={() => openFromThumb(session.id, m.id)}
                                       onDelete={() => deleteMediaFromProject(activeProject.id, session.id, m.id)}
                                     />
                                   </div>
@@ -859,16 +864,15 @@ function VaultShell() {
                       );
                     })}
 
-                    {/* Sticky selected bar (shows only in selection mode) */}
+                    {/* Sticky selected bar */}
                     {selectMode && selectedSessionId && (
                       <div className="sticky bottom-0 pb-5 mt-10">
                         <div
                           className="mx-auto px-4 py-3 flex items-center justify-between gap-3"
                           style={{
-                            borderRadius: 18,
-                            background: "rgba(255,255,255,0.82)",
+                            borderRadius: 8,
+                            background: "rgba(255,255,255,0.90)",
                             border: `1px solid ${palette.line}`,
-                            backdropFilter: "blur(18px)",
                             boxShadow: "0 22px 60px -52px rgba(0,0,0,0.45)",
                           }}
                         >
@@ -881,7 +885,7 @@ function VaultShell() {
                               onClick={exitSelect}
                               className="h-10 px-4 text-sm font-semibold"
                               style={{
-                                borderRadius: 14,
+                                borderRadius: 8,
                                 background: "transparent",
                                 border: `1px solid ${palette.line}`,
                                 color: "rgba(0,0,0,0.55)",
@@ -894,7 +898,7 @@ function VaultShell() {
                               onClick={deleteSelected}
                               className="h-10 px-4 text-sm font-semibold inline-flex items-center gap-2"
                               style={{
-                                borderRadius: 14,
+                                borderRadius: 8,
                                 background: "rgba(220,38,38,0.10)",
                                 border: "1px solid rgba(220,38,38,0.25)",
                                 color: "#DC2626",
@@ -910,28 +914,6 @@ function VaultShell() {
                   </div>
                 </div>
               </>
-            )}
-
-            {/* MEDIA VIEW */}
-            {view === "media" && activeProject && currentMedia && (
-              <MediaViewer
-                project={activeProject}
-                media={currentMedia}
-                headerFont={headerFont}
-                palette={palette}
-                mediaIndex={mediaIndex}
-                mediaCount={sessionMediaList.length}
-                onBack={() => {
-                  setView("project");
-                  setActiveMedia(null);
-                }}
-                onPrev={goPrev}
-                onNext={goNext}
-                onDeleteMedia={handleDeleteCurrentMedia}
-                onAddHotspot={addHotspotToMedia}
-                onUpdateHotspot={updateHotspotInMedia}
-                onDeleteHotspot={deleteHotspotFromMedia}
-              />
             )}
 
             {/* Modals */}
