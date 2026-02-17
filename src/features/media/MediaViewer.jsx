@@ -91,24 +91,23 @@ export default function MediaViewer({
     setPinOpen(true);
   };
 
-const savePinEdits = async (nextDraft) => {
-  if (!project?.id || !pinTarget) return;
+  const savePinEdits = async (nextDraft) => {
+    if (!project?.id || !pinTarget) return;
 
-  try {
-    await onUpdateHotspot?.(
-      project.id,
-      pinTarget.sessionId,
-      pinTarget.mediaId,
-      pinTarget.hotspotId,
-      { label: nextDraft?.label || "", note: nextDraft?.note || "" }
-    );
-    setPinOpen(false);
-    setPinTarget(null);
-  } catch (e) {
-    console.error("Failed to update pin:", e);
-  }
-};
-
+    try {
+      await onUpdateHotspot?.(
+        project.id,
+        pinTarget.sessionId,
+        pinTarget.mediaId,
+        pinTarget.hotspotId,
+        { label: nextDraft?.label || "", note: nextDraft?.note || "" }
+      );
+      setPinOpen(false);
+      setPinTarget(null);
+    } catch (e) {
+      console.error("Failed to update pin:", e);
+    }
+  };
 
   const deletePin = async () => {
     if (!project?.id || !pinTarget) return;
@@ -278,9 +277,12 @@ const savePinEdits = async (nextDraft) => {
     }
   };
 
-  // Swipe handling
+  // Swipe handling (mobile-first)
+  // - Allow swipe in focus mode too.
+  // - Keep disabled while adding pins.
+  // - Stage uses touchAction: pan-y, and the image is pointerEvents:none.
   const onStagePointerDown = (e) => {
-    if (isAddPinMode || isFocusMode) return;
+    if (isAddPinMode) return;
     const x = e.clientX ?? e.touches?.[0]?.clientX;
     const y = e.clientY ?? e.touches?.[0]?.clientY;
     if (x == null || y == null) return;
@@ -288,18 +290,22 @@ const savePinEdits = async (nextDraft) => {
   };
 
   const onStagePointerEnd = (e) => {
-    if (isAddPinMode || isFocusMode) return;
+    if (isAddPinMode) return;
     if (!swipeRef.current.down) return;
 
-    const x = e.clientX ?? e.changedTouches?.[0]?.clientX ?? e.touches?.[0]?.clientX;
-    const y = e.clientY ?? e.changedTouches?.[0]?.clientY ?? e.touches?.[0]?.clientY;
+    const x =
+      e.clientX ?? e.changedTouches?.[0]?.clientX ?? e.touches?.[0]?.clientX ?? null;
+    const y =
+      e.clientY ?? e.changedTouches?.[0]?.clientY ?? e.touches?.[0]?.clientY ?? null;
+
     swipeRef.current.down = false;
     if (x == null || y == null) return;
 
     const dx = x - swipeRef.current.x0;
     const dy = y - swipeRef.current.y0;
 
-    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy)) {
+    // Require clear horizontal intent
+    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.25) {
       if (dx < 0) onNext?.();
       else onPrev?.();
     }
@@ -383,6 +389,7 @@ const savePinEdits = async (nextDraft) => {
           className={`relative min-h-0 flex items-center justify-center ${
             isAddPinMode && !isFocusMode ? "cursor-crosshair" : ""
           }`}
+          style={{ touchAction: "pan-y" }}
           onClick={handleStageClickToAddPin}
           onPointerDown={onStagePointerDown}
           onPointerMove={onStagePointerMove}
@@ -394,12 +401,15 @@ const savePinEdits = async (nextDraft) => {
             onStagePointerUp(e);
             onStagePointerEnd(e);
           }}
+          onTouchStart={onStagePointerDown}
+          onTouchEnd={onStagePointerEnd}
         >
           <img
             src={media?.url}
             className={`max-w-full max-h-full object-contain transition-opacity duration-200 ease-out ${
               isAddPinMode ? "opacity-85" : "opacity-100"
             }`}
+            style={{ pointerEvents: "none" }}
             alt=""
             draggable={false}
           />
@@ -536,7 +546,9 @@ const savePinEdits = async (nextDraft) => {
                   title="Add pin"
                 >
                   <MapPin className="w-4 h-4" />
-                  <span className="text-xs font-semibold">{isAddPinMode ? "Cancel" : "Add Pin"}</span>
+                  <span className="text-xs font-semibold">
+                    {isAddPinMode ? "Cancel" : "Add Pin"}
+                  </span>
                 </button>
               </div>
 
@@ -625,8 +637,13 @@ const savePinEdits = async (nextDraft) => {
                                   currentHotspots.findIndex((h) => h.id === selectedPin?.id) + 1
                                 )}
                               </div>
-                              <div className="text-sm font-semibold truncate" style={{ fontFamily: headerFont }}>
-                                {selectedPin?.label?.trim() ? selectedPin.label : "Untitled pin"}
+                              <div
+                                className="text-sm font-semibold truncate"
+                                style={{ fontFamily: headerFont }}
+                              >
+                                {selectedPin?.label?.trim()
+                                  ? selectedPin.label
+                                  : "Untitled pin"}
                               </div>
                             </div>
 
@@ -652,7 +669,7 @@ const savePinEdits = async (nextDraft) => {
                         </div>
                       </div>
 
-                                            {/* Quick pin list */}
+                      {/* Quick pin list */}
                       <div className="flex gap-2 overflow-x-auto pb-1">
                         {currentHotspots.map((h, i) => {
                           const active = h.id === selectedPin?.id;
@@ -700,6 +717,3 @@ const savePinEdits = async (nextDraft) => {
     </div>
   );
 }
-
-
-

@@ -10,6 +10,7 @@ import {
   Play,
   MoreHorizontal,
   Pencil,
+  Check,
 } from "lucide-react";
 
 import { VaultProvider, useVault } from "./context/VaultContext";
@@ -28,10 +29,7 @@ function AuthGate({ children }) {
 
   if (!authReady) {
     return (
-      <div
-        className="min-h-screen flex items-center justify-center"
-        style={{ background: "#FFFEFA" }}
-      >
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#FFFEFA" }}>
         <Loader2 className="w-8 h-8 animate-spin text-black" />
       </div>
     );
@@ -47,10 +45,7 @@ function BrandMark() {
   const palette = { sky: "#3AA8FF", sun: "#FFEA3A" };
 
   return (
-    <div
-      className="text-[20px] font-bold tracking-[-0.01em] leading-none select-none"
-      style={{ fontFamily: headerFont }}
-    >
+    <div className="text-[20px] font-bold tracking-[-0.01em] leading-none select-none" style={{ fontFamily: headerFont }}>
       <span style={{ color: palette.sky }}>[</span>
       <span style={{ letterSpacing: "0.08em" }}>Index</span>
       <span style={{ color: palette.sun }}>]</span>
@@ -58,9 +53,6 @@ function BrandMark() {
   );
 }
 
-/**
- * Tile-style button (used elsewhere; not used for Start Project anymore)
- */
 function TileButton({ variant = "primary", icon: Icon, children, style, ...props }) {
   const isPrimary = variant === "primary";
 
@@ -157,9 +149,7 @@ function ProfileMenu({ user, onSignOut, palette }) {
           }}
         >
           <div className="px-4 py-3">
-            <div className="text-sm font-semibold text-black/80 truncate">
-              {user?.displayName || "Account"}
-            </div>
+            <div className="text-sm font-semibold text-black/80 truncate">{user?.displayName || "Account"}</div>
             <div className="text-xs text-black/50 truncate">{user?.email || ""}</div>
           </div>
 
@@ -324,7 +314,7 @@ function VaultShell() {
     tab,
     setTab,
 
-    // ✅ for search UI
+    // search UI
     search,
     setSearch,
 
@@ -340,6 +330,7 @@ function VaultShell() {
     renameSession,
     deleteSession,
     deleteMediaFromProject,
+    bulkDeleteMediaFromSession,
 
     addHotspotToMedia,
     updateHotspotInMedia,
@@ -352,7 +343,7 @@ function VaultShell() {
   const [mediaOpen, setMediaOpen] = useState(false);
   const [autoPromptMediaPicker, setAutoPromptMediaPicker] = useState(false);
 
-  // ✅ focus search input when Search tab opens
+  // focus search input when Search tab opens
   const searchInputRef = useRef(null);
   useEffect(() => {
     if (view === "dashboard" && tab === "search") {
@@ -362,9 +353,78 @@ function VaultShell() {
   }, [view, tab]);
 
   // -----------------------------
+  // Multi-select (Apple-style)
+  // -----------------------------
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+
+  useEffect(() => {
+    if (view !== "project") {
+      setSelectMode(false);
+      setSelectedSessionId(null);
+      setSelectedIds(new Set());
+    }
+  }, [view, activeProject?.id]);
+
+  const exitSelect = () => {
+    setSelectMode(false);
+    setSelectedSessionId(null);
+    setSelectedIds(new Set());
+  };
+
+  const enterSelect = (sessionId, mediaId) => {
+    setSelectMode(true);
+    setSelectedSessionId(sessionId);
+    setSelectedIds(new Set([mediaId]));
+  };
+
+  const toggleSelect = (sessionId, mediaId) => {
+    if (!selectMode || selectedSessionId !== sessionId) {
+      enterSelect(sessionId, mediaId);
+      return;
+    }
+
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(mediaId)) next.delete(mediaId);
+      else next.add(mediaId);
+
+      if (next.size === 0) {
+        setSelectMode(false);
+        setSelectedSessionId(null);
+      }
+      return next;
+    });
+  };
+
+  const deleteSelected = async () => {
+    if (!activeProject?.id || !selectedSessionId || selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} item(s)?`)) return;
+
+    const ids = Array.from(selectedIds);
+
+    if (bulkDeleteMediaFromSession) {
+      await bulkDeleteMediaFromSession(activeProject.id, selectedSessionId, ids);
+    } else {
+      for (const id of ids) {
+        // eslint-disable-next-line no-await-in-loop
+        await deleteMediaFromProject(activeProject.id, selectedSessionId, id);
+      }
+    }
+
+    exitSelect();
+  };
+
+  // -----------------------------
   // Navigation helpers
   // -----------------------------
   const goBack = () => {
+    if (selectMode) {
+      exitSelect();
+      return;
+    }
+
     if (view === "media") {
       setView("project");
       setActiveMedia(null);
@@ -387,9 +447,7 @@ function VaultShell() {
     setMediaOpen(true);
   };
 
-  // -----------------------------
   // Create project + auto-open upload
-  // -----------------------------
   const handleCreateProject = async ({ title, tags, note }) => {
     try {
       const p = await addProject({ title, aiTags: tags, note });
@@ -454,14 +512,6 @@ function VaultShell() {
     }
   };
 
-  const handleDeleteCurrentMedia = async () => {
-    if (!activeProject || !activeMedia?.id || !activeMedia?.sessionId) return;
-    if (!confirm("Permanently delete this photo?")) return;
-    await deleteMediaFromProject(activeProject.id, activeMedia.sessionId, activeMedia.id);
-    setActiveMedia(null);
-    setView("project");
-  };
-
   const shareSession = async (session) => {
     if (!activeProject?.id || !session?.id) return;
     const token = `${activeProject.id}::${session.id}`;
@@ -485,7 +535,7 @@ function VaultShell() {
   };
 
   // -----------------------------
-  // Derive current media + session + index
+  // Media (viewer helpers)
   // -----------------------------
   const currentSession = useMemo(() => {
     if (!activeProject || !activeMedia?.sessionId) return null;
@@ -519,6 +569,14 @@ function VaultShell() {
   const goPrev = () => goToMediaIndex(mediaIndex - 1);
   const goNext = () => goToMediaIndex(mediaIndex + 1);
 
+  const handleDeleteCurrentMedia = async () => {
+    if (!activeProject || !activeMedia?.id || !activeMedia?.sessionId) return;
+    if (!confirm("Permanently delete this photo?")) return;
+    await deleteMediaFromProject(activeProject.id, activeMedia.sessionId, activeMedia.id);
+    setActiveMedia(null);
+    setView("project");
+  };
+
   // -----------------------------
   // Render
   // -----------------------------
@@ -530,11 +588,7 @@ function VaultShell() {
       >
         {view === "dashboard" && <Navigation currentTab={tab} setTab={setTab} />}
 
-        <div
-          className={`w-full transition-all duration-300 ease-out flex justify-center ${
-            view === "dashboard" ? "md:pl-64" : ""
-          }`}
-        >
+        <div className={`w-full transition-all duration-300 ease-out flex justify-center ${view === "dashboard" ? "md:pl-64" : ""}`}>
           <div
             className={`w-full ${view === "dashboard" ? "max-w-md" : "max-w-6xl"} min-h-screen relative border-x`}
             style={{
@@ -551,7 +605,6 @@ function VaultShell() {
                 <div className="relative pt-8 mb-2">
                   <div className="h-12 relative">
                     <div className="absolute inset-0 flex items-center justify-between">
-                      {/* Add Project (yellow circle, PLUS = ink) */}
                       <button
                         onClick={() => setNewOpen(true)}
                         className="w-10 h-10 rounded-full inline-flex items-center justify-center active:scale-[0.97] transition-transform duration-200 ease-out"
@@ -566,18 +619,11 @@ function VaultShell() {
                         <Plus className="w-5 h-5" style={{ color: palette.ink }} />
                       </button>
 
-                      <ProfileMenu
-                        user={user}
-                        palette={palette}
-                        onSignOut={() => signOutUser?.()}
-                      />
+                      <ProfileMenu user={user} palette={palette} onSignOut={() => signOutUser?.()} />
                     </div>
 
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div
-                        className="pointer-events-auto"
-                        style={{ fontFamily: headerFont }}
-                      >
+                      <div className="pointer-events-auto" style={{ fontFamily: headerFont }}>
                         <BrandMark />
                       </div>
                     </div>
@@ -609,10 +655,7 @@ function VaultShell() {
                         className="w-full bg-transparent outline-none text-sm"
                         style={{ color: "rgba(0,0,0,0.78)" }}
                       />
-                      <div
-                        className="text-[10px] mt-1"
-                        style={{ color: "rgba(0,0,0,0.40)" }}
-                      >
+                      <div className="text-[10px] mt-1" style={{ color: "rgba(0,0,0,0.40)" }}>
                         Try a project name or a #tag
                       </div>
                     </div>
@@ -644,7 +687,7 @@ function VaultShell() {
                     }}
                   >
                     <ChevronLeft className="w-6 h-6" />
-                    <span className="font-semibold text-sm">Back</span>
+                    <span className="font-semibold text-sm">{selectMode ? "Cancel" : "Back"}</span>
                   </button>
 
                   <div className="flex gap-2">
@@ -689,12 +732,7 @@ function VaultShell() {
                         items={[
                           { label: "Share", icon: Share, onClick: shareProject },
                           { label: "Edit", icon: Pencil, onClick: handleRenameProject },
-                          {
-                            label: "Delete",
-                            icon: Trash2,
-                            danger: true,
-                            onClick: handleDeleteProject,
-                          },
+                          { label: "Delete", icon: Trash2, danger: true, onClick: handleDeleteProject },
                         ]}
                       />
                     </div>
@@ -754,9 +792,7 @@ function VaultShell() {
                         <p className="text-[10px] font-semibold text-black/45 uppercase tracking-widest mb-1">
                           Project Context
                         </p>
-                        <p className="text-sm text-gray-900 leading-relaxed">
-                          “{activeProject.overallAudio}”
-                        </p>
+                        <p className="text-sm text-gray-900 leading-relaxed">“{activeProject.overallAudio}”</p>
                       </div>
                     </div>
                   )}
@@ -765,10 +801,7 @@ function VaultShell() {
                     <div key={session.id} className="mb-12">
                       <div className="flex justify-between items-baseline pb-2 mb-4">
                         <div className="flex items-center gap-2 min-w-0">
-                          <h3
-                            className="text-sm font-semibold truncate"
-                            style={{ fontFamily: headerFont }}
-                          >
+                          <h3 className="text-sm font-semibold truncate" style={{ fontFamily: headerFont }}>
                             {session.title}
                           </h3>
 
@@ -794,17 +827,80 @@ function VaultShell() {
                       </div>
 
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                        {(session.media || []).map((m) => (
-                          <MediaCard
-                            key={m.id}
-                            item={m}
-                            onClick={() => navigateToMedia(m, session.id)}
-                            onDelete={() => deleteMediaFromProject(activeProject.id, session.id, m.id)}
-                          />
-                        ))}
+                        {(session.media || []).map((m) => {
+                          const inThisSession = selectMode && selectedSessionId === session.id;
+                          const isSelected = inThisSession && selectedIds.has(m.id);
+
+                          return (
+                            <MediaCard
+                              key={m.id}
+                              item={m}
+                              selectionMode={inThisSession}
+                              selected={isSelected}
+                              onLongPress={() => enterSelect(session.id, m.id)}
+                              onToggleSelect={() => toggleSelect(session.id, m.id)}
+                              onClick={() => {
+                                if (inThisSession) toggleSelect(session.id, m.id);
+                                else navigateToMedia(m, session.id);
+                              }}
+                              onDelete={
+                                inThisSession ? null : () => deleteMediaFromProject(activeProject.id, session.id, m.id)
+                              }
+                            />
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
+
+                  {/* Sticky selected bar (shows only in selection mode) */}
+                  {selectMode && selectedSessionId && (
+                    <div className="sticky bottom-0 pb-5">
+                      <div
+                        className="mx-auto mt-6 px-4 py-3 flex items-center justify-between gap-3"
+                        style={{
+                          borderRadius: 18,
+                          background: "rgba(255,255,255,0.82)",
+                          border: `1px solid ${palette.line}`,
+                          backdropFilter: "blur(18px)",
+                          boxShadow: "0 22px 60px -52px rgba(0,0,0,0.45)",
+                        }}
+                      >
+                        <div className="text-sm font-semibold" style={{ color: "rgba(0,0,0,0.75)" }}>
+                          {selectedIds.size} selected
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={exitSelect}
+                            className="h-10 px-4 text-sm font-semibold"
+                            style={{
+                              borderRadius: 14,
+                              background: "transparent",
+                              border: `1px solid ${palette.line}`,
+                              color: "rgba(0,0,0,0.55)",
+                            }}
+                          >
+                            Cancel
+                          </button>
+
+                          <button
+                            onClick={deleteSelected}
+                            className="h-10 px-4 text-sm font-semibold inline-flex items-center gap-2"
+                            style={{
+                              borderRadius: 14,
+                              background: "rgba(220,38,38,0.10)",
+                              border: "1px solid rgba(220,38,38,0.25)",
+                              color: "#DC2626",
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -832,11 +928,7 @@ function VaultShell() {
             )}
 
             {/* Modals */}
-            <NewProjectModal
-              open={newOpen}
-              onClose={() => setNewOpen(false)}
-              onCreate={handleCreateProject}
-            />
+            <NewProjectModal open={newOpen} onClose={() => setNewOpen(false)} onCreate={handleCreateProject} />
 
             <AddMediaModal
               isOpen={mediaOpen}

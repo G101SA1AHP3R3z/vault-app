@@ -1,15 +1,14 @@
 // /src/components/AddMediaModal.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { X, Camera, Upload, Check, RefreshCw, ChevronDown } from "lucide-react";
+import { X, Camera, Upload, ChevronDown, Loader2, Plus } from "lucide-react";
 
 export default function AddMediaModal({
   open,
   isOpen,
   onClose,
-  onAddMedia,
+  onAddMedia, // expects: ({ files: File[], sessionId, sessionTitle }) => Promise
   existingSessions = [],
   autoPrompt = false,
-  autoSubmit = false,
 }) {
   const OPEN = typeof isOpen === "boolean" ? isOpen : Boolean(open);
 
@@ -25,19 +24,21 @@ export default function AddMediaModal({
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
 
-  const [sessionMode, setSessionMode] = useState("existing"); // "existing" | "new"
+  const [sessionMode, setSessionMode] = useState("existing"); // existing | new
   const [sessionId, setSessionId] = useState("");
   const [newSessionTitle, setNewSessionTitle] = useState("");
 
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const [files, setFiles] = useState([]); // up to 5
+  const [previews, setPreviews] = useState([]); // object URLs
+
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploaded, setUploaded] = useState(false);
 
   const [showSessionPicker, setShowSessionPicker] = useState(true);
 
   const cameraInputRef = useRef(null);
   const uploadInputRef = useRef(null);
 
-  // Build “recent uploads” from your existingSessions media
   const recentThumbs = useMemo(() => {
     const all = [];
     (existingSessions || []).forEach((s) => {
@@ -46,32 +47,32 @@ export default function AddMediaModal({
           (typeof m?.url === "string" && m.url.trim()) ||
           (typeof m?.coverPhoto === "string" && m.coverPhoto.trim()) ||
           "";
-        if (url) all.push({ id: m.id, url, type: m.type || m.kind || m.mediaType });
+        if (url) all.push({ id: m.id, url });
       });
     });
-    // newest first (best-effort: assumes later sessions/media are newer)
     return all.reverse().slice(0, 18);
   }, [existingSessions]);
 
   useEffect(() => {
     if (OPEN) {
       setMounted(true);
-      // reset form
-      setSessionMode(existingSessions.length > 0 ? "existing" : "new");
+      setUploaded(false);
+      setIsUploading(false);
+
+      const hasSessions = existingSessions.length > 0;
+      setSessionMode(hasSessions ? "existing" : "new");
       setSessionId(existingSessions[0]?.id || "");
       setNewSessionTitle("");
-      setSelectedFile(null);
-      setIsSaving(false);
 
-      // animate in next tick
+      setFiles([]);
+      setPreviews([]);
+
       requestAnimationFrame(() => setVisible(true));
 
-      // auto-open picker if requested
       if (autoPrompt) {
         setTimeout(() => uploadInputRef.current?.click?.(), 120);
       }
     } else if (mounted) {
-      // animate out
       setVisible(false);
       const t = setTimeout(() => setMounted(false), 220);
       return () => clearTimeout(t);
@@ -79,60 +80,107 @@ export default function AddMediaModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [OPEN]);
 
+  useEffect(() => {
+    return () => {
+      previews.forEach((u) => {
+        try {
+          URL.revokeObjectURL(u);
+        } catch {}
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const close = () => {
     setVisible(false);
     setTimeout(() => onClose?.(), 200);
   };
 
-  const handlePick = (file) => {
-    if (!file) return;
-    setSelectedFile(file);
-    if (autoSubmit) {
-      setTimeout(() => handleSubmit(file), 0);
-    }
+  const hydratePreviews = (nextFiles) => {
+    previews.forEach((u) => {
+      try {
+        URL.revokeObjectURL(u);
+      } catch {}
+    });
+    setPreviews(nextFiles.map((f) => URL.createObjectURL(f)));
+  };
+
+  const pushFiles = (picked) => {
+    const incoming = Array.isArray(picked) ? picked.filter(Boolean) : [];
+    if (incoming.length === 0) return;
+
+    setFiles((prev) => {
+      const next = [...prev, ...incoming].slice(0, 5);
+      hydratePreviews(next);
+      return next;
+    });
   };
 
   const handleCameraPick = (e) => {
-    const file = e.target.files?.[0];
-    if (file) handlePick(file);
+    const f = e.target.files?.[0];
+    if (f) pushFiles([f]);
     e.target.value = "";
   };
 
   const handleUploadPick = (e) => {
-    const file = e.target.files?.[0];
-    if (file) handlePick(file);
+    const list = Array.from(e.target.files || []);
+    if (list.length) pushFiles(list);
     e.target.value = "";
   };
 
-  const handleSubmit = async (fileOverride) => {
-    const effectiveFile = fileOverride || selectedFile;
-    if (!effectiveFile) return;
-
-    setIsSaving(true);
-    try {
-      await onAddMedia({
-        file: effectiveFile,
-        sessionId: sessionMode === "existing" ? sessionId : null,
-        sessionTitle: sessionMode === "new" ? newSessionTitle : "",
-      });
-      close();
-    } finally {
-      setIsSaving(false);
-    }
+  const removeAt = (idx) => {
+    setFiles((prev) => {
+      const next = prev.slice();
+      next.splice(idx, 1);
+      hydratePreviews(next);
+      return next;
+    });
   };
+
+  // ✅ Auto-upload when files goes from empty -> non-empty
+  useEffect(() => {
+    if (!OPEN) return;
+    if (isUploading) return;
+    if (uploaded) return;
+    if (files.length === 0) return;
+
+    const run = async () => {
+      setIsUploading(true);
+      try {
+        const sid = sessionMode === "existing" ? sessionId : null;
+        const title = sessionMode === "new" ? (newSessionTitle || "New Session") : "";
+
+        await onAddMedia?.({
+          files,
+          sessionId: sid,
+          sessionTitle: title,
+        });
+
+        setUploaded(true);
+      } catch (err) {
+        console.error("Upload failed:", err);
+        alert(err?.message || "Upload failed. Check console.");
+      } finally {
+        setIsUploading(false);
+      }
+    };
+
+    const t = setTimeout(run, 180); // tiny grace period for “oops” removals
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files.length]);
 
   if (!mounted) return null;
 
-  const fileLabel = selectedFile
-    ? `${selectedFile.name || "Selected file"}${selectedFile.type ? ` • ${selectedFile.type}` : ""}`
-    : "";
+  const canClose = !isUploading;
 
   return (
     <div className="fixed inset-0 z-[100]">
-      {/* Backdrop */}
       <div
         className="absolute inset-0"
-        onClick={close}
+        onClick={() => {
+          if (canClose) close();
+        }}
         style={{
           background: "rgba(11,11,12,0.45)",
           backdropFilter: "blur(6px)",
@@ -141,7 +189,6 @@ export default function AddMediaModal({
         }}
       />
 
-      {/* Bottom Sheet */}
       <div
         className="absolute left-0 right-0 bottom-0 w-full"
         style={{
@@ -161,7 +208,6 @@ export default function AddMediaModal({
             boxShadow: "0 -24px 70px -52px rgba(0,0,0,0.55)",
           }}
         >
-          {/* Grab handle */}
           <div className="pt-3 pb-2 flex justify-center">
             <div
               style={{
@@ -173,7 +219,6 @@ export default function AddMediaModal({
             />
           </div>
 
-          {/* Header row */}
           <div className="px-4 pb-3 flex items-center justify-between">
             <div className="text-[16px] font-semibold" style={{ color: palette.ink }}>
               Add Media
@@ -190,30 +235,31 @@ export default function AddMediaModal({
               </button>
 
               <button
-                onClick={close}
+                onClick={() => {
+                  if (canClose) close();
+                }}
                 className="w-9 h-9 grid place-items-center"
                 style={{
                   borderRadius: 12,
                   background: "rgba(255,255,255,0.70)",
                   border: `1px solid ${palette.line}`,
                   color: "rgba(0,0,0,0.65)",
+                  opacity: canClose ? 1 : 0.5,
                 }}
                 aria-label="Close"
-                title="Close"
+                title={canClose ? "Close" : "Uploading…"}
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
           </div>
 
-          {/* Recents strip (your uploads) */}
           <div className="px-4 pb-3">
             <div className="text-[11px] font-semibold uppercase tracking-widest text-black/45 mb-2">
               Recent uploads
             </div>
 
             <div className="flex gap-3 overflow-x-auto pb-2">
-              {/* Camera tile (like iOS) */}
               <button
                 type="button"
                 onClick={() => cameraInputRef.current?.click()}
@@ -252,7 +298,6 @@ export default function AddMediaModal({
                       border: `1px solid ${palette.line}`,
                       background: "rgba(255,255,255,0.55)",
                     }}
-                    title="Recent upload"
                   >
                     <img
                       src={t.url}
@@ -266,7 +311,6 @@ export default function AddMediaModal({
             </div>
           </div>
 
-          {/* Session picker (kept, but styled + collapsible) */}
           <div className="px-4 pb-3">
             <button
               type="button"
@@ -280,7 +324,7 @@ export default function AddMediaModal({
               }}
             >
               <div className="text-[12px] font-semibold">
-                Session{" "}
+                Add to{" "}
                 <span style={{ color: "rgba(0,0,0,0.45)", fontWeight: 600 }}>
                   {sessionMode === "existing"
                     ? existingSessions.find((s) => s.id === sessionId)?.title || "Existing"
@@ -312,6 +356,7 @@ export default function AddMediaModal({
                       type="button"
                       onClick={() => setSessionMode("existing")}
                       className="flex-1 py-2 text-[11px] font-semibold uppercase tracking-widest"
+                      disabled={isUploading}
                       style={{
                         borderRadius: 14,
                         border: `1px solid ${palette.line}`,
@@ -323,6 +368,7 @@ export default function AddMediaModal({
                           sessionMode === "existing"
                             ? "rgba(0,0,0,0.75)"
                             : "rgba(0,0,0,0.45)",
+                        opacity: isUploading ? 0.6 : 1,
                       }}
                     >
                       Existing
@@ -333,6 +379,7 @@ export default function AddMediaModal({
                     type="button"
                     onClick={() => setSessionMode("new")}
                     className="flex-1 py-2 text-[11px] font-semibold uppercase tracking-widest"
+                    disabled={isUploading}
                     style={{
                       borderRadius: 14,
                       border: `1px solid ${palette.line}`,
@@ -344,6 +391,7 @@ export default function AddMediaModal({
                         sessionMode === "new"
                           ? "rgba(0,0,0,0.75)"
                           : "rgba(0,0,0,0.45)",
+                      opacity: isUploading ? 0.6 : 1,
                     }}
                   >
                     New
@@ -353,11 +401,13 @@ export default function AddMediaModal({
                 {sessionMode === "existing" ? (
                   <select
                     className="w-full px-3 py-3 text-sm font-semibold outline-none"
+                    disabled={isUploading}
                     style={{
                       borderRadius: 14,
                       background: "rgba(255,255,255,0.70)",
                       border: `1px solid ${palette.line}`,
                       color: "rgba(0,0,0,0.75)",
+                      opacity: isUploading ? 0.6 : 1,
                     }}
                     value={sessionId}
                     onChange={(e) => setSessionId(e.target.value)}
@@ -373,11 +423,13 @@ export default function AddMediaModal({
                     type="text"
                     placeholder="Session name (e.g. Second fitting)"
                     className="w-full px-3 py-3 text-sm font-semibold outline-none"
+                    disabled={isUploading}
                     style={{
                       borderRadius: 14,
                       background: "rgba(255,255,255,0.70)",
                       border: `1px solid ${palette.line}`,
                       color: "rgba(0,0,0,0.75)",
+                      opacity: isUploading ? 0.6 : 1,
                     }}
                     value={newSessionTitle}
                     onChange={(e) => setNewSessionTitle(e.target.value)}
@@ -387,90 +439,122 @@ export default function AddMediaModal({
             )}
           </div>
 
-          {/* Selected file (minimal) */}
-          {selectedFile && (
-            <div className="px-4 pb-3">
+          <div className="px-4 pb-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[11px] font-semibold uppercase tracking-widest text-black/45">
+                Selected (up to 5)
+              </div>
+
+              <button
+                type="button"
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={isUploading || files.length >= 5}
+                className="h-8 px-3 inline-flex items-center gap-2 text-[11px] font-semibold"
+                style={{
+                  borderRadius: 12,
+                  background: "rgba(255,255,255,0.70)",
+                  border: `1px solid ${palette.line}`,
+                  color: "rgba(0,0,0,0.70)",
+                  opacity: isUploading || files.length >= 5 ? 0.5 : 1,
+                }}
+              >
+                <Plus className="w-4 h-4" /> Add
+              </button>
+            </div>
+
+            {files.length === 0 ? (
               <div
-                className="flex items-center justify-between gap-3 px-3 py-2"
+                className="px-3 py-3"
                 style={{
                   borderRadius: 16,
                   background: "rgba(255,255,255,0.62)",
                   border: `1px solid ${palette.line}`,
+                  color: "rgba(0,0,0,0.40)",
+                  fontSize: 12,
                 }}
               >
-                <div className="min-w-0">
-                  <div className="text-[10px] font-semibold uppercase tracking-widest text-black/45">
-                    Selected
-                  </div>
-                  <div className="text-[12px] font-semibold text-black/70 truncate">
-                    {fileLabel}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setSelectedFile(null)}
-                  className="w-9 h-9 grid place-items-center"
-                  style={{
-                    borderRadius: 12,
-                    background: "rgba(255,255,255,0.70)",
-                    border: `1px solid ${palette.line}`,
-                    color: "rgba(0,0,0,0.65)",
-                  }}
-                  aria-label="Clear selection"
-                  title="Clear"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </button>
+                Pick up to 5 photos/videos. They’ll upload automatically.
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="flex gap-3 overflow-x-auto pb-2">
+                {previews.map((u, idx) => (
+                  <div
+                    key={u}
+                    className="shrink-0 relative overflow-hidden"
+                    style={{
+                      width: 92,
+                      height: 92,
+                      borderRadius: 18,
+                      border: `1px solid ${palette.line}`,
+                      background: "rgba(255,255,255,0.55)",
+                    }}
+                  >
+                    <img
+                      src={u}
+                      alt=""
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      draggable={false}
+                    />
 
-          {/* Footer actions */}
+                    {!isUploading && !uploaded && (
+                      <button
+                        type="button"
+                        onClick={() => removeAt(idx)}
+                        className="absolute top-2 right-2 w-7 h-7 grid place-items-center"
+                        style={{
+                          borderRadius: 999,
+                          background: "rgba(255,255,255,0.78)",
+                          border: `1px solid ${palette.line}`,
+                          color: "rgba(0,0,0,0.70)",
+                          backdropFilter: "blur(12px)",
+                        }}
+                        aria-label="Remove"
+                        title="Remove"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div
-            className="px-4 pt-2 pb-5 flex gap-3"
+            className="px-4 pt-3 pb-5 flex items-center justify-between"
             style={{
               borderTop: `1px solid ${palette.line}`,
               background: "rgba(255,255,255,0.55)",
             }}
           >
-            <button
-              onClick={close}
-              className="flex-1 h-11 text-sm font-semibold"
-              style={{
-                borderRadius: 16,
-                background: "transparent",
-                border: `1px solid ${palette.line}`,
-                color: "rgba(0,0,0,0.55)",
-              }}
-            >
-              Cancel
-            </button>
+            <div className="text-xs font-semibold" style={{ color: "rgba(0,0,0,0.55)" }}>
+              {isUploading ? "Uploading…" : uploaded ? "Uploaded. Tap outside to close." : ""}
+            </div>
 
-            <button
-              onClick={() => handleSubmit()}
-              disabled={!selectedFile || isSaving}
-              className="flex-[2] h-11 text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            <div
+              className="h-10 px-4 inline-flex items-center gap-2"
               style={{
-                borderRadius: 16,
-                background: selectedFile ? palette.sun : "rgba(0,0,0,0.08)",
-                color: selectedFile ? palette.ink : "rgba(0,0,0,0.45)",
-                boxShadow: selectedFile
-                  ? "0 12px 28px -22px rgba(0,0,0,0.45)"
-                  : "none",
+                borderRadius: 14,
+                background: isUploading
+                  ? "rgba(0,0,0,0.06)"
+                  : uploaded
+                  ? "rgba(84,230,193,0.18)"
+                  : "rgba(255,234,58,0.30)",
+                border: `1px solid ${palette.line}`,
+                color: "rgba(0,0,0,0.70)",
               }}
             >
-              {isSaving ? (
-                "Saving…"
+              {isUploading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
-                <>
-                  <Check className="w-4 h-4" /> Save
-                </>
+                <Upload className="w-4 h-4" />
               )}
-            </button>
+              <span className="text-[11px] font-semibold uppercase tracking-widest">
+                {isUploading ? "Saving" : uploaded ? "Saved" : "Ready"}
+              </span>
+            </div>
           </div>
 
-          {/* Hidden inputs */}
           <input
             ref={cameraInputRef}
             type="file"
@@ -483,6 +567,7 @@ export default function AddMediaModal({
             ref={uploadInputRef}
             type="file"
             accept="image/*,video/*"
+            multiple
             className="hidden"
             onChange={handleUploadPick}
           />

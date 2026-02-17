@@ -17,7 +17,7 @@ import {
   arrayUnion,
 } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { auth, db, storage } from "../lib/firebase";
 
 const VaultContext = createContext(null);
@@ -28,7 +28,6 @@ const formatDateShort = (d = new Date()) =>
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 
 const uid = () => {
-  // Stable-ish ids for UI lists + Firestore array items
   try {
     return crypto.randomUUID();
   } catch {
@@ -59,95 +58,6 @@ export function VaultProvider({ children }) {
   const [search, setSearch] = useState("");
 
   const [projects, setProjects] = useState([]);
-  const deleteProjectDeep = async (projectId) => {
-  if (!user?.uid || !projectId) return;
-
-  const proj = projects.find((p) => p.id === projectId) || activeProject;
-  if (proj && !isOwner(proj)) {
-    throw new Error("Only the owner can delete this project.");
-  }
-
-  // Pull freshest version (avoid stale state)
-  const projectRef = doc(db, "projects", projectId);
-  const snap = await getDoc(projectRef);
-  if (!snap.exists()) return;
-
-  const data = snap.data();
-  const sessions = safeArray(data.sessions);
-
-  // Collect storage paths
-  const paths = [];
-  sessions.forEach((s) => {
-    safeArray(s.media).forEach((m) => {
-      if (m?.path) paths.push(m.path);
-    });
-  });
-
-  // Delete storage objects (best-effort)
-  await Promise.allSettled(
-    paths.map((p) => deleteObject(storageRef(storage, p)))
-  );
-
-  // Delete Firestore doc last
-  await deleteDoc(projectRef);
-
-  if (activeProject?.id === projectId) {
-    setActiveProject(null);
-    setActiveMedia(null);
-    setView("dashboard");
-  }
-};
-
-// Bulk delete multiple projects (deep)
-const bulkDeleteProjects = async (projectIds = []) => {
-  if (!user?.uid) return;
-  const ids = safeArray(projectIds).filter(Boolean);
-  for (const id of ids) {
-    await deleteProjectDeep(id);
-  }
-};
-
-// Bulk delete selected photos inside ONE project/session
-const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) => {
-  if (!user?.uid || !projectId || !sessionId) return;
-
-  const proj = projects.find((p) => p.id === projectId) || activeProject;
-  if (proj && !canEdit(proj)) {
-    throw new Error("You don’t have edit access to this project.");
-  }
-
-  const projectRef = doc(db, "projects", projectId);
-  const snap = await getDoc(projectRef);
-  if (!snap.exists()) return;
-
-  const data = snap.data();
-  const idSet = new Set(safeArray(mediaIds));
-
-  // Collect paths to delete
-  const paths = [];
-  safeArray(data.sessions).forEach((s) => {
-    if (s.id !== sessionId) return;
-    safeArray(s.media).forEach((m) => {
-      if (idSet.has(m.id) && m?.path) paths.push(m.path);
-    });
-  });
-
-  // Remove from sessions array
-  const sessions = safeArray(data.sessions).map((s) => {
-    if (s.id !== sessionId) return s;
-    const nextMedia = safeArray(s.media).filter((m) => !idSet.has(m.id));
-    return { ...s, media: nextMedia };
-  });
-
-  await updateDoc(projectRef, { sessions });
-
-  // Delete storage objects after doc update (best-effort)
-  await Promise.allSettled(paths.map((p) => deleteObject(storageRef(storage, p))));
-
-  if (activeProject?.id === projectId) {
-    setActiveProject((p) => (p ? { ...p, sessions } : p));
-  }
-};
 
   // -----------------------------
   // Auth
@@ -176,7 +86,7 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
       orderBy("createdAt", "desc")
     );
 
-    // LEGACY projects: createdBy == uid (old docs may have no members/roles yet)
+    // LEGACY projects: createdBy == uid
     const qLegacy = query(
       collection(db, "projects"),
       where("createdBy", "==", user.uid),
@@ -213,7 +123,6 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
     if (updated) {
       setActiveProject(updated);
     } else {
-      // Project was deleted or user lost access
       setActiveProject(null);
       setActiveMedia(null);
       setView("dashboard");
@@ -223,8 +132,6 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
 
   // -----------------------------
   // Permissions helpers (UI-side)
-  // Backward-compatible: if roles/members don't exist yet, treat createdBy as owner.
-  // If legacy collaborators exist, treat them like editor.
   // -----------------------------
   const isLegacyOwner = (project) => !!user?.uid && project?.createdBy === user.uid;
   const isLegacyCollaborator = (project) =>
@@ -234,14 +141,11 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
     const me = user?.uid;
     if (!me || !project) return null;
 
-    // New model
     const roles = project.roles || null;
     if (roles && typeof roles === "object" && roles[me]) return roles[me];
 
-    // Legacy fallback
     if (isLegacyOwner(project)) return "owner";
     if (isLegacyCollaborator(project)) return "editor";
-
     return null;
   };
 
@@ -266,7 +170,6 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
       createdAt: serverTimestamp(),
       createdBy: user.uid,
 
-      // ✅ collaborators (Google Docs style foundation)
       members: [user.uid],
       roles: { [user.uid]: "owner" },
 
@@ -282,13 +185,15 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
   const deleteProject = async (projectId) => {
     if (!user?.uid || !projectId) return;
 
-    // UI-side check (rules should enforce owner-only too)
     const proj = projects.find((p) => p.id === projectId) || activeProject;
     if (proj && !isOwner(proj)) {
       throw new Error("Only the owner can delete this project.");
     }
 
     await deleteDoc(doc(db, "projects", projectId));
+
+    // ✅ immediately remove from UI
+    setProjects((prev) => prev.filter((p) => p.id !== projectId));
 
     if (activeProject?.id === projectId) {
       setActiveProject(null);
@@ -311,7 +216,6 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
     const ref = doc(db, "projects", projectId);
     await updateDoc(ref, { title });
 
-    // Optimistic local update (snapshot will also sync)
     setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, title } : p)));
     if (activeProject?.id === projectId) setActiveProject((p) => (p ? { ...p, title } : p));
   };
@@ -336,7 +240,6 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
 
     await updateDoc(projectRef, { sessions });
 
-    // Optimistic local update
     setProjects((prev) =>
       prev.map((p) => {
         if (p.id !== projectId) return p;
@@ -346,6 +249,7 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
         };
       })
     );
+
     if (activeProject?.id === projectId) {
       setActiveProject((p) =>
         p
@@ -381,7 +285,7 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
     return inviteRef.id;
   };
 
-  // IMPORTANT: For the rules we just installed, join must write joinWithInvite: inviteId
+  // IMPORTANT: For the rules we installed, join must write joinWithInvite: inviteId
   const redeemInvite = async (inviteId) => {
     if (!user?.uid || !inviteId) return null;
 
@@ -410,7 +314,7 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
       tx.update(projectRef, {
         members: nextMembers,
         roles: nextRoles,
-        joinWithInvite: inviteId, // ✅ required for rules-based join validation
+        joinWithInvite: inviteId,
       });
 
       return invite.projectId;
@@ -419,7 +323,6 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
     return projectId;
   };
 
-  // Owner actions for collaborators
   const setMemberRole = async (projectId, memberUid, role) => {
     if (!user?.uid || !projectId || !memberUid) return;
 
@@ -488,18 +391,11 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
   };
 
   // -----------------------------
-  // Media
+  // Media helpers
   // -----------------------------
-  const addMediaToProject = async (projectId, file, sessionId = null, sessionTitle = "") => {
-    if (!user?.uid || !file || !projectId) return;
-
-    const proj = projects.find((p) => p.id === projectId) || activeProject;
-    if (proj && !canEdit(proj)) {
-      throw new Error("You don’t have edit access to this project.");
-    }
-
+  const uploadSingleToStorage = async (projectId, file) => {
     const safeName = (file.name || "upload").replace(/[^\w.-]+/g, "_");
-    const storagePath = `projects/${projectId}/${Date.now()}_${safeName}`;
+    const storagePath = `projects/${projectId}/${Date.now()}_${uid()}_${safeName}`;
     const fileRef = storageRef(storage, storagePath);
 
     await uploadBytes(fileRef, file, {
@@ -507,9 +403,9 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
     });
 
     const url = await getDownloadURL(fileRef);
-
     const isVideo = !!file.type?.startsWith("video");
-    const newMedia = {
+
+    return {
       id: `m-${uid()}`,
       type: isVideo ? "video" : "photo",
       url,
@@ -517,6 +413,30 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
       createdAt: new Date().toISOString(),
       hotspots: [],
     };
+  };
+
+  const applyProjectPatchLocal = (projectId, patch) => {
+    setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, ...patch } : p)));
+    if (activeProject?.id === projectId) {
+      setActiveProject((p) => (p ? { ...p, ...patch } : p));
+    }
+  };
+
+  // -----------------------------
+  // Media (single + multi)
+  // -----------------------------
+  const addMediaFilesToProject = async (projectId, files = [], sessionId = null, sessionTitle = "") => {
+    if (!user?.uid || !projectId) return;
+    const list = safeArray(files).filter(Boolean);
+    if (list.length === 0) return;
+
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(proj)) {
+      throw new Error("You don’t have edit access to this project.");
+    }
+
+    // upload in parallel (you cap at 5 in UI anyway)
+    const uploadedMedia = await Promise.all(list.slice(0, 5).map((f) => uploadSingleToStorage(projectId, f)));
 
     const projectRef = doc(db, "projects", projectId);
     const snap = await getDoc(projectRef);
@@ -529,27 +449,34 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
       sessions = sessions.map((s) => {
         if (s.id !== sessionId) return s;
         const prev = safeArray(s.media);
-        return { ...s, media: [...prev, newMedia] };
+        return { ...s, media: [...prev, ...uploadedMedia] };
       });
     } else {
       const newSession = {
         id: `s-${uid()}`,
         title: sessionTitle || "New Session",
         date: formatDateShort(),
-        media: [newMedia],
+        media: uploadedMedia,
       };
       sessions = [newSession, ...sessions];
     }
 
+    // cover photo: prefer first photo, otherwise first video (if empty)
     let coverPhoto = data.coverPhoto || "";
-    if (!isVideo) coverPhoto = url;
-    if (isVideo && !coverPhoto) coverPhoto = url;
+    const firstPhoto = uploadedMedia.find((m) => m.type !== "video");
+    const firstAny = uploadedMedia[0] || null;
+    if (firstPhoto?.url) coverPhoto = firstPhoto.url;
+    else if (!coverPhoto && firstAny?.url) coverPhoto = firstAny.url;
 
     await updateDoc(projectRef, { sessions, coverPhoto });
 
-    if (activeProject?.id === projectId) {
-      setActiveProject((p) => (p ? { ...p, sessions, coverPhoto } : p));
-    }
+    // ✅ optimistic local update so it doesn't "linger"
+    applyProjectPatchLocal(projectId, { sessions, coverPhoto });
+  };
+
+  const addMediaToProject = async (projectId, file, sessionId = null, sessionTitle = "") => {
+    if (!file) return;
+    return addMediaFilesToProject(projectId, [file], sessionId, sessionTitle);
   };
 
   const deleteMediaFromProject = async (projectId, sessionId, mediaId) => {
@@ -574,13 +501,42 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
 
     await updateDoc(projectRef, { sessions });
 
-    if (activeProject?.id === projectId) {
-      setActiveProject((p) => (p ? { ...p, sessions } : p));
-      if (activeMedia?.sessionId === sessionId && activeMedia?.id === mediaId) {
-        setActiveMedia(null);
-        setView("project");
-      }
+    // ✅ optimistic local update
+    applyProjectPatchLocal(projectId, { sessions });
+
+    if (activeMedia?.sessionId === sessionId && activeMedia?.id === mediaId) {
+      setActiveMedia(null);
+      setView("project");
     }
+  };
+
+  const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) => {
+    if (!user?.uid || !projectId || !sessionId) return;
+
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(proj)) {
+      throw new Error("You don’t have edit access to this project.");
+    }
+
+    const idSet = new Set(safeArray(mediaIds));
+    if (idSet.size === 0) return;
+
+    const projectRef = doc(db, "projects", projectId);
+    const snap = await getDoc(projectRef);
+    if (!snap.exists()) return;
+
+    const data = snap.data();
+
+    const sessions = safeArray(data.sessions).map((session) => {
+      if (session.id !== sessionId) return session;
+      const media = safeArray(session.media).filter((m) => !idSet.has(m.id));
+      return { ...session, media };
+    });
+
+    await updateDoc(projectRef, { sessions });
+
+    // ✅ optimistic local update
+    applyProjectPatchLocal(projectId, { sessions });
   };
 
   // -----------------------------
@@ -604,12 +560,12 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
 
     await updateDoc(projectRef, { sessions: nextSessions });
 
-    if (activeProject?.id === projectId) {
-      setActiveProject((p) => (p ? { ...p, sessions: nextSessions } : p));
-      if (activeMedia?.sessionId === sessionId) {
-        setActiveMedia(null);
-        setView("project");
-      }
+    // ✅ optimistic local update
+    applyProjectPatchLocal(projectId, { sessions: nextSessions });
+
+    if (activeMedia?.sessionId === sessionId) {
+      setActiveMedia(null);
+      setView("project");
     }
   };
 
@@ -648,10 +604,7 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
     });
 
     await updateDoc(projectRef, { sessions });
-
-    if (activeProject?.id === projectId) {
-      setActiveProject((p) => (p ? { ...p, sessions } : p));
-    }
+    applyProjectPatchLocal(projectId, { sessions });
   };
 
   const updateHotspotInMedia = async (projectId, sessionId, mediaId, hotspotId, updates = {}) => {
@@ -685,10 +638,7 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
     });
 
     await updateDoc(projectRef, { sessions });
-
-    if (activeProject?.id === projectId) {
-      setActiveProject((p) => (p ? { ...p, sessions } : p));
-    }
+    applyProjectPatchLocal(projectId, { sessions });
   };
 
   const deleteHotspotFromMedia = async (projectId, sessionId, mediaId, hotspotId) => {
@@ -718,10 +668,7 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
     });
 
     await updateDoc(projectRef, { sessions });
-
-    if (activeProject?.id === projectId) {
-      setActiveProject((p) => (p ? { ...p, sessions } : p));
-    }
+    applyProjectPatchLocal(projectId, { sessions });
   };
 
   // -----------------------------
@@ -776,13 +723,10 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
     setActiveMedia,
     search,
     setSearch,
-    deleteProjectDeep,
-    bulkDeleteProjects,
-    bulkDeleteMediaFromSession,
 
     filteredProjects,
 
-    // permissions helpers (for UI)
+    // permissions helpers
     getMyRole,
     canEdit,
     isOwner,
@@ -803,7 +747,9 @@ const bulkDeleteMediaFromSession = async (projectId, sessionId, mediaIds = []) =
     deleteSession,
     renameSession,
     addMediaToProject,
+    addMediaFilesToProject, // ✅ multi upload (up to 5 from UI)
     deleteMediaFromProject,
+    bulkDeleteMediaFromSession,
 
     // hotspots
     addHotspotToMedia,
