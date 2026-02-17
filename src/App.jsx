@@ -7,10 +7,8 @@ import {
   Trash2,
   Upload,
   Loader2,
-  Play,
   MoreHorizontal,
   Pencil,
-  Check,
 } from "lucide-react";
 
 import { VaultProvider, useVault } from "./context/VaultContext";
@@ -669,64 +667,39 @@ function VaultShell() {
             {/* PROJECT VIEW */}
             {view === "project" && activeProject && (
               <>
-                {/* PROJECT TOP BAR */}
+                {/* PROJECT HEADER (Pinterest-like pin view) */}
                 <div
-                  className="px-4 pt-12 pb-3 flex justify-between items-center z-40 sticky top-0"
-                  style={{
-                    background: "rgba(255,255,255,0.70)",
-                    backdropFilter: "blur(16px)",
-                    borderBottom: "1px solid rgba(0,0,0,0.08)",
-                  }}
+                  className="px-4 pt-10 md:pt-12 pb-4 sticky top-0 z-40"
+                  style={{ background: "rgba(255,254,250,0.72)", backdropFilter: "blur(16px)" }}
                 >
-                  <button
-                    onClick={goBack}
-                    className="flex items-center gap-1 text-gray-700 hover:text-black transition-colors px-2 py-2 rounded-[8px]"
-                    style={{
-                      background: "rgba(255,255,255,0.45)",
-                      border: "1px solid rgba(0,0,0,0.06)",
-                    }}
-                  >
-                    <ChevronLeft className="w-6 h-6" />
-                    <span className="font-semibold text-sm">{selectMode ? "Cancel" : "Back"}</span>
-                  </button>
-
-                  <div className="flex gap-2">
+                  <div className="max-w-5xl mx-auto flex items-center justify-between">
                     <button
-                      onClick={handleDeleteProject}
-                      className="p-2 rounded-[8px] transition-colors"
+                      onClick={selectMode ? exitSelect : goBack}
+                      className="w-10 h-10 rounded-full inline-flex items-center justify-center"
                       style={{
-                        background: "rgba(255,255,255,0.55)",
-                        border: "1px solid rgba(0,0,0,0.08)",
-                        color: "#DC2626",
+                        background: "rgba(255,255,255,0.82)",
+                        border: `1px solid ${palette.line}`,
+                        boxShadow: "0 18px 45px -40px rgba(0,0,0,0.35)",
                       }}
-                      title="Delete project"
+                      aria-label={selectMode ? "Cancel selection" : "Back"}
+                      title={selectMode ? "Cancel" : "Back"}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <ChevronLeft className="w-5 h-5" />
                     </button>
 
-                    <button
-                      className="flex items-center gap-2 px-3 py-2 rounded-[8px] text-[11px] font-semibold"
-                      style={{
-                        background: palette.sun,
-                        color: palette.ink,
-                        border: "1px solid rgba(0,0,0,0.10)",
-                      }}
-                    >
-                      <Share className="w-4 h-4" /> Export
-                    </button>
-                  </div>
-                </div>
+                    <div className="flex items-center gap-2">
+                      <TileButton
+                        variant="secondary"
+                        icon={Upload}
+                        onClick={() => {
+                          setAutoPromptMediaPicker(false);
+                          setMediaOpen(true);
+                        }}
+                        style={{ height: 40, borderRadius: 999, paddingLeft: 14, paddingRight: 14 }}
+                      >
+                        Add
+                      </TileButton>
 
-                <div className="p-5 md:p-10 transition-all duration-300 ease-out">
-                  <div className="flex items-start justify-between gap-4">
-                    <h2
-                      className="text-4xl md:text-6xl font-semibold mb-6 leading-none tracking-[-0.02em]"
-                      style={{ fontFamily: headerFont, color: palette.ink }}
-                    >
-                      {activeProject.title}
-                    </h2>
-
-                    <div className="pt-2">
                       <KebabMenu
                         palette={palette}
                         items={[
@@ -737,170 +710,202 @@ function VaultShell() {
                       />
                     </div>
                   </div>
+                </div>
 
-                  <div className="mb-6">
-                    <TileButton
-                      variant="secondary"
-                      icon={Upload}
-                      onClick={() => {
-                        setAutoPromptMediaPicker(false);
-                        setMediaOpen(true);
-                      }}
-                      style={{
-                        border: `1px solid ${palette.line}`,
-                        color: "rgba(0,0,0,0.75)",
-                      }}
-                    >
-                      Add Media
-                    </TileButton>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 mb-8">
-                    {(activeProject.aiTags || []).map((tag) => (
-                      <span
-                        key={tag}
-                        className="text-[11px] font-semibold px-3 py-1 rounded-[8px]"
-                        style={{
-                          background: "rgba(255,255,255,0.55)",
-                          border: "1px solid rgba(0,0,0,0.08)",
-                          color: "rgba(0,0,0,0.55)",
-                        }}
-                      >
-                        #{tag}
-                      </span>
-                    ))}
-                  </div>
-
-                  {activeProject.overallAudio && (
-                    <div
-                      className="p-6 mb-10 flex gap-4 rounded-[12px]"
-                      style={{
-                        background: "rgba(255,255,255,0.62)",
-                        border: "1px solid rgba(0,0,0,0.08)",
-                        backdropFilter: "blur(16px)",
-                        boxShadow: "0 22px 60px -52px rgba(0,0,0,0.28)",
-                      }}
-                    >
-                      <button
-                        className="w-12 h-12 bg-black text-white rounded-full flex items-center justify-center shrink-0 shadow-lg hover:scale-[1.02] transition-transform duration-200 ease-out"
-                        title="Play"
-                      >
-                        <Play className="w-5 h-5 ml-1" />
-                      </button>
-
-                      <div className="flex-1">
-                        <p className="text-[10px] font-semibold text-black/45 uppercase tracking-widest mb-1">
-                          Project Context
-                        </p>
-                        <p className="text-sm text-gray-900 leading-relaxed">“{activeProject.overallAudio}”</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {(activeProject.sessions || []).map((session) => (
-                    <div key={session.id} className="mb-12">
-                      <div className="flex justify-between items-baseline pb-2 mb-4">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <h3 className="text-sm font-semibold truncate" style={{ fontFamily: headerFont }}>
-                            {session.title}
-                          </h3>
-
-                          <KebabMenu
-                            palette={palette}
-                            items={[
-                              { label: "Share", icon: Share, onClick: () => shareSession(session) },
-                              { label: "Edit", icon: Pencil, onClick: () => handleRenameSession(session) },
-                              {
-                                label: "Delete",
-                                icon: Trash2,
-                                danger: true,
-                                onClick: () => {
-                                  if (!confirm(`Delete "${session.title}" and all its photos?`)) return;
-                                  deleteSession?.(activeProject.id, session.id);
-                                },
-                              },
-                            ]}
-                          />
-                        </div>
-
-                        <p className="text-xs text-black/40">{session.date}</p>
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                        {(session.media || []).map((m) => {
-                          const inThisSession = selectMode && selectedSessionId === session.id;
-                          const isSelected = inThisSession && selectedIds.has(m.id);
-
-                          return (
-                            <MediaCard
-                              key={m.id}
-                              item={m}
-                              selectionMode={inThisSession}
-                              selected={isSelected}
-                              onLongPress={() => enterSelect(session.id, m.id)}
-                              onToggleSelect={() => toggleSelect(session.id, m.id)}
-                              onClick={() => {
-                                if (inThisSession) toggleSelect(session.id, m.id);
-                                else navigateToMedia(m, session.id);
-                              }}
-                              onDelete={
-                                inThisSession ? null : () => deleteMediaFromProject(activeProject.id, session.id, m.id)
-                              }
-                            />
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-
-                  {/* Sticky selected bar (shows only in selection mode) */}
-                  {selectMode && selectedSessionId && (
-                    <div className="sticky bottom-0 pb-5">
+                <div className="px-4 pb-24 md:pb-28">
+                  <div className="max-w-5xl mx-auto">
+                    {/* Hero media card */}
+                    {activeProject.coverPhoto ? (
                       <div
-                        className="mx-auto mt-6 px-4 py-3 flex items-center justify-between gap-3"
+                        className="w-full overflow-hidden"
                         style={{
                           borderRadius: 18,
-                          background: "rgba(255,255,255,0.82)",
+                          background: "rgba(255,255,255,0.70)",
                           border: `1px solid ${palette.line}`,
-                          backdropFilter: "blur(18px)",
-                          boxShadow: "0 22px 60px -52px rgba(0,0,0,0.45)",
+                          boxShadow: "0 26px 70px -56px rgba(0,0,0,0.55)",
                         }}
                       >
-                        <div className="text-sm font-semibold" style={{ color: "rgba(0,0,0,0.75)" }}>
-                          {selectedIds.size} selected
-                        </div>
+                        <img
+                          src={activeProject.coverPhoto}
+                          alt=""
+                          className="w-full object-cover"
+                          style={{ aspectRatio: "4 / 3" }}
+                          loading="lazy"
+                        />
+                      </div>
+                    ) : null}
 
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={exitSelect}
-                            className="h-10 px-4 text-sm font-semibold"
-                            style={{
-                              borderRadius: 14,
-                              background: "transparent",
-                              border: `1px solid ${palette.line}`,
-                              color: "rgba(0,0,0,0.55)",
-                            }}
-                          >
-                            Cancel
-                          </button>
-
-                          <button
-                            onClick={deleteSelected}
-                            className="h-10 px-4 text-sm font-semibold inline-flex items-center gap-2"
-                            style={{
-                              borderRadius: 14,
-                              background: "rgba(220,38,38,0.10)",
-                              border: "1px solid rgba(220,38,38,0.25)",
-                              color: "#DC2626",
-                            }}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                            Delete
-                          </button>
+                    <div className="mt-5 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h2
+                          className="text-[26px] md:text-[34px] font-semibold tracking-[-0.02em] leading-tight"
+                          style={{ fontFamily: headerFont, color: palette.ink }}
+                        >
+                          {activeProject.title}
+                        </h2>
+                        <div className="mt-1 text-[12px] text-black/45">
+                          {activeProject.expiresIn ? `Expires in ${activeProject.expiresIn}` : ""}
                         </div>
                       </div>
+
+                      <button
+                        onClick={handleDeleteProject}
+                        className="w-10 h-10 rounded-full inline-flex items-center justify-center"
+                        style={{
+                          background: "rgba(255,255,255,0.82)",
+                          border: `1px solid ${palette.line}`,
+                          color: "#DC2626",
+                        }}
+                        title="Delete project"
+                        aria-label="Delete project"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
-                  )}
+
+                    {/* Tags */}
+                    <div className="flex flex-wrap gap-2 mb-8 mt-6">
+                      {(activeProject.aiTags || []).map((tag) => (
+                        <span
+                          key={tag}
+                          className="text-[11px] font-semibold px-3 py-1 rounded-[8px]"
+                          style={{
+                            background: "rgba(255,255,255,0.55)",
+                            border: "1px solid rgba(0,0,0,0.08)",
+                            color: "rgba(0,0,0,0.55)",
+                          }}
+                        >
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+
+                    {/* Sessions (Pinterest "more to explore" vibe) */}
+                    {(activeProject.sessions || []).map((session) => {
+                      const inThisSession = selectMode && selectedSessionId === session.id;
+
+                      return (
+                        <div key={session.id} className="mt-10">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <h3 className="text-[13px] font-semibold truncate" style={{ fontFamily: headerFont }}>
+                                  {session.title}
+                                </h3>
+                                <span className="text-[11px] text-black/40">{session.date}</span>
+                              </div>
+                              <div className="text-[11px] text-black/45 mt-0.5">
+                                {(session.media || []).length} items
+                              </div>
+                            </div>
+
+                            <KebabMenu
+                              palette={palette}
+                              items={[
+                                { label: "Share", icon: Share, onClick: () => shareSession(session) },
+                                { label: "Edit", icon: Pencil, onClick: () => handleRenameSession(session) },
+                                {
+                                  label: "Delete",
+                                  icon: Trash2,
+                                  danger: true,
+                                  onClick: () => {
+                                    if (!confirm(`Delete "${session.title}" and all its photos?`)) return;
+                                    deleteSession?.(activeProject.id, session.id);
+                                  },
+                                },
+                              ]}
+                            />
+                          </div>
+
+                          {/* If selecting, grid is better; otherwise, horizontal rail like Pinterest */}
+                          {inThisSession ? (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                              {(session.media || []).map((m) => {
+                                const isSelected = selectedIds.has(m.id);
+                                return (
+                                  <MediaCard
+                                    key={m.id}
+                                    item={m}
+                                    variant="square"
+                                    selectionMode
+                                    selected={isSelected}
+                                    onLongPress={() => enterSelect(session.id, m.id)}
+                                    onToggleSelect={() => toggleSelect(session.id, m.id)}
+                                    onClick={() => toggleSelect(session.id, m.id)}
+                                  />
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="-mx-4 px-4 overflow-x-auto">
+                              <div className="flex gap-3 pb-2">
+                                {(session.media || []).map((m) => (
+                                  <div key={m.id} className="shrink-0" style={{ width: 182 }}>
+                                    <MediaCard
+                                      item={m}
+                                      variant="tall"
+                                      onLongPress={() => enterSelect(session.id, m.id)}
+                                      onClick={() => navigateToMedia(m, session.id)}
+                                      onDelete={() => deleteMediaFromProject(activeProject.id, session.id, m.id)}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Sticky selected bar (shows only in selection mode) */}
+                    {selectMode && selectedSessionId && (
+                      <div className="sticky bottom-0 pb-5 mt-10">
+                        <div
+                          className="mx-auto px-4 py-3 flex items-center justify-between gap-3"
+                          style={{
+                            borderRadius: 18,
+                            background: "rgba(255,255,255,0.82)",
+                            border: `1px solid ${palette.line}`,
+                            backdropFilter: "blur(18px)",
+                            boxShadow: "0 22px 60px -52px rgba(0,0,0,0.45)",
+                          }}
+                        >
+                          <div className="text-sm font-semibold" style={{ color: "rgba(0,0,0,0.75)" }}>
+                            {selectedIds.size} selected
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={exitSelect}
+                              className="h-10 px-4 text-sm font-semibold"
+                              style={{
+                                borderRadius: 14,
+                                background: "transparent",
+                                border: `1px solid ${palette.line}`,
+                                color: "rgba(0,0,0,0.55)",
+                              }}
+                            >
+                              Cancel
+                            </button>
+
+                            <button
+                              onClick={deleteSelected}
+                              className="h-10 px-4 text-sm font-semibold inline-flex items-center gap-2"
+                              style={{
+                                borderRadius: 14,
+                                background: "rgba(220,38,38,0.10)",
+                                border: "1px solid rgba(220,38,38,0.25)",
+                                color: "#DC2626",
+                              }}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </>
             )}

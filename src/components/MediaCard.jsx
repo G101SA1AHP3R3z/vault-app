@@ -1,17 +1,27 @@
-import React, { useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { Trash2, Play, MapPin, Check } from "lucide-react";
 
+/**
+ * MediaCard
+ * - Used inside session grids and horizontal "more to explore" rails.
+ * - Supports long-press to enter selection mode (Pinterest / iOS Photos vibe).
+ */
 export default function MediaCard({
   item,
   onClick,
   onDelete,
 
-  // ✅ selection mode
+  // Selection mode
   selectionMode = false,
   selected = false,
   onLongPress,
   onToggleSelect,
+
+  // Layout
+  variant = "square", // "square" | "tall"
 }) {
+  const pressRef = useRef({ timer: null, longPressed: false });
+
   const src = useMemo(() => {
     if (!item) return "";
     if (typeof item.url === "string" && item.url.trim()) return item.url;
@@ -19,162 +29,119 @@ export default function MediaCard({
     return "";
   }, [item]);
 
-  const isVideo =
-    item?.type === "video" || item?.kind === "video" || item?.mediaType === "video";
-
+  const isVideo = item?.type === "video" || item?.kind === "video" || item?.mediaType === "video";
   const hotspotsCount = Array.isArray(item?.hotspots) ? item.hotspots.length : 0;
 
-  // Index palette (match app/login vibe)
   const palette = {
     ink: "#0B0B0C",
-    paper: "#FFFEFA",
     line: "rgba(0,0,0,0.08)",
     sky: "#3AA8FF",
     sun: "#FFEA3A",
-    breeze: "#54E6C1",
   };
 
-  // ✅ Long press (activate selection mode) + swallow click after long-press
-  const pressTimer = useRef(null);
-  const startPt = useRef({ x: 0, y: 0 });
-  const moved = useRef(false);
-  const didLongPress = useRef(false);
+  useEffect(() => {
+    return () => {
+      if (pressRef.current.timer) clearTimeout(pressRef.current.timer);
+      pressRef.current.timer = null;
+    };
+  }, []);
 
-  const clearPress = () => {
-    if (pressTimer.current) clearTimeout(pressTimer.current);
-    pressTimer.current = null;
-    moved.current = false;
-    // note: do NOT clear didLongPress here; we need it to swallow the next click
+  const clearTimer = () => {
+    if (pressRef.current.timer) clearTimeout(pressRef.current.timer);
+    pressRef.current.timer = null;
   };
 
-  const handlePointerDown = (e) => {
+  const onPointerDown = () => {
+    pressRef.current.longPressed = false;
+    clearTimer();
     if (!onLongPress) return;
-
-    didLongPress.current = false;
-    startPt.current = { x: e.clientX, y: e.clientY };
-    moved.current = false;
-
-    clearPress();
-    pressTimer.current = setTimeout(() => {
-      if (!moved.current) {
-        didLongPress.current = true; // ✅ mark long-press happened
-        onLongPress?.();
-      }
+    pressRef.current.timer = setTimeout(() => {
+      pressRef.current.longPressed = true;
+      onLongPress?.();
     }, 420);
   };
 
-  const handlePointerMove = (e) => {
-    const dx = Math.abs(e.clientX - startPt.current.x);
-    const dy = Math.abs(e.clientY - startPt.current.y);
-    if (dx + dy > 10) {
-      moved.current = true;
-      clearPress();
-    }
-  };
+  const onPointerUp = () => clearTimer();
 
-  const handlePointerUp = () => clearPress();
-  const handlePointerCancel = () => clearPress();
-
-  const handleCardClick = () => {
-    // ✅ If long-press just fired, ignore this click so selection stays active
-    if (didLongPress.current) {
-      didLongPress.current = false;
+  const handleClick = () => {
+    if (pressRef.current.longPressed) {
+      pressRef.current.longPressed = false;
       return;
     }
-
-    if (selectionMode) {
-      onToggleSelect?.();
-      return;
-    }
-
-    onClick?.();
+    if (selectionMode) onToggleSelect?.();
+    else onClick?.();
   };
+
+  const aspect = variant === "tall" ? "aspect-[3/4]" : "aspect-square";
 
   return (
     <div
-      onClick={handleCardClick}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerCancel}
-      className="aspect-square overflow-hidden relative cursor-pointer active:scale-[0.98] transition-transform group select-none"
+      onClick={handleClick}
+      onPointerDown={onPointerDown}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onPointerLeave={onPointerUp}
+      className={`${aspect} overflow-hidden relative cursor-pointer group active:scale-[0.985] transition-transform`}
       style={{
-        borderRadius: 12,
-        background: "rgba(255,255,255,0.62)",
+        borderRadius: 14,
+        background: "rgba(255,255,255,0.70)",
         border: `1px solid ${palette.line}`,
         backdropFilter: "blur(14px)",
-        boxShadow: "0 18px 45px -38px rgba(0,0,0,0.35)",
+        boxShadow: "0 18px 45px -38px rgba(0,0,0,0.30)",
       }}
+      role="button"
+      tabIndex={0}
     >
       {src ? (
         <>
           <img
             src={src}
             className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
-            alt="Media"
+            alt=""
             loading="lazy"
             draggable={false}
           />
-
-          {/* subtle unifying overlay (sun/sky) */}
           <div
             className="absolute inset-0 pointer-events-none"
             style={{
               background:
-                "linear-gradient(135deg, rgba(58,168,255,0.12) 0%, rgba(255,234,58,0.08) 52%, rgba(255,255,255,0.06) 100%)",
+                "linear-gradient(135deg, rgba(58,168,255,0.10) 0%, rgba(255,234,58,0.06) 55%, rgba(255,255,255,0.04) 100%)",
               mixBlendMode: "screen",
             }}
           />
-          <div className="absolute inset-0 bg-white/5 pointer-events-none" />
         </>
       ) : (
         <div className="w-full h-full flex items-center justify-center text-black/40 text-[10px] font-semibold uppercase tracking-widest">
-          No cover
+          No media
         </div>
       )}
 
-      {/* ✅ Selection UI */}
       {selectionMode && (
         <>
           <div
             className="absolute inset-0 pointer-events-none"
-            style={{
-              background: selected ? "rgba(11,11,12,0.12)" : "rgba(11,11,12,0.06)",
-            }}
+            style={{ background: selected ? "rgba(58,168,255,0.10)" : "rgba(0,0,0,0.02)" }}
           />
-
           <div
-            className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center"
+            className="absolute top-2 right-2 w-8 h-8 rounded-full grid place-items-center"
             style={{
-              borderRadius: 999,
-              background: selected ? palette.sun : "rgba(255,255,255,0.62)",
+              background: selected ? palette.sky : "rgba(255,255,255,0.82)",
+              color: selected ? "#fff" : "rgba(0,0,0,0.55)",
               border: `1px solid ${palette.line}`,
               backdropFilter: "blur(14px)",
-              boxShadow: selected ? "0 12px 26px -22px rgba(0,0,0,0.45)" : "none",
             }}
           >
-            {selected ? <Check className="w-4 h-4" style={{ color: palette.ink }} /> : null}
+            <Check className="w-4 h-4" />
           </div>
-
-          <div
-            className="absolute inset-0 pointer-events-none"
-            style={{
-              borderRadius: 12,
-              boxShadow: selected
-                ? "inset 0 0 0 2px rgba(255,234,58,0.55), inset 0 0 0 3px rgba(58,168,255,0.20)"
-                : "inset 0 0 0 1px rgba(0,0,0,0.06)",
-            }}
-          />
         </>
       )}
 
-      {/* Video chip */}
-      {isVideo && (
+      {isVideo && !selectionMode && (
         <div
           className="absolute bottom-2 left-2 inline-flex items-center gap-1 px-2 py-1"
           style={{
-            borderRadius: 8,
-            background: "rgba(255,255,255,0.55)",
+            borderRadius: 10,
+            background: "rgba(255,255,255,0.68)",
             border: `1px solid ${palette.line}`,
             backdropFilter: "blur(14px)",
             color: "rgba(0,0,0,0.70)",
@@ -185,13 +152,12 @@ export default function MediaCard({
         </div>
       )}
 
-      {/* Hotspots chip */}
-      {item?.type === "photo" && hotspotsCount > 0 && (
+      {item?.type === "photo" && hotspotsCount > 0 && !selectionMode && (
         <div
           className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-1"
           style={{
-            borderRadius: 8,
-            background: "rgba(255,255,255,0.55)",
+            borderRadius: 10,
+            background: "rgba(255,255,255,0.68)",
             border: `1px solid ${palette.line}`,
             backdropFilter: "blur(14px)",
             color: "rgba(0,0,0,0.70)",
@@ -203,8 +169,7 @@ export default function MediaCard({
         </div>
       )}
 
-      {/* Delete (hidden while selecting) */}
-      {!selectionMode && onDelete && (
+      {onDelete && !selectionMode && (
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -212,8 +177,8 @@ export default function MediaCard({
           }}
           className="absolute top-2 right-2 w-8 h-8 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
           style={{
-            borderRadius: 8,
-            background: "rgba(255,255,255,0.55)",
+            borderRadius: 12,
+            background: "rgba(255,255,255,0.68)",
             border: `1px solid ${palette.line}`,
             backdropFilter: "blur(14px)",
             color: "rgba(0,0,0,0.60)",
@@ -223,18 +188,6 @@ export default function MediaCard({
         >
           <Trash2 className="w-4 h-4" />
         </button>
-      )}
-
-      {/* Hover accent hairline (subtle, sunny) */}
-      {!selectionMode && (
-        <div
-          className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
-          style={{
-            borderRadius: 12,
-            boxShadow:
-              "inset 0 0 0 1px rgba(255,234,58,0.20), inset 0 0 0 2px rgba(58,168,255,0.10)",
-          }}
-        />
       )}
     </div>
   );
