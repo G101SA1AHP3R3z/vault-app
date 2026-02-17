@@ -256,7 +256,7 @@ function AbstractCreamBackdrop({ children }) {
   );
 
   return (
-    <div className="min-h-screen relative" style={{ background: palette.paper }}>
+<div className="min-h-screen relative" style={{ background: "#FFFEFA" }}>
       <div className="fixed inset-0 -z-10 overflow-hidden">
         <div
           className="absolute -top-28 -left-28 w-[520px] h-[520px] rounded-[48px] rotate-[18deg]"
@@ -270,14 +270,15 @@ function AbstractCreamBackdrop({ children }) {
           className="absolute -bottom-44 left-16 w-[760px] h-[460px] rounded-[70px] rotate-[10deg]"
           style={{ background: palette.breeze, opacity: 0.09 }}
         />
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(180deg, rgba(255,255,255,0.78) 0%, rgba(255,255,255,0.45) 40%, rgba(255,255,255,0.78) 100%)",
-            opacity: 0.7,
-          }}
-        />
+       <div
+  className="absolute inset-0"
+  style={{
+    background:
+      "linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.25) 40%, rgba(255,255,255,0.55) 100%)",
+    opacity: 0.55,
+  }}
+/>
+
       </div>
 
       {children}
@@ -590,11 +591,12 @@ function VaultShell() {
           <div
             className={`w-full ${view === "dashboard" ? "max-w-md" : "max-w-6xl"} min-h-screen relative border-x`}
             style={{
-              background: "rgba(255,255,255,0.68)",
-              borderColor: "rgba(0,0,0,0.08)",
-              backdropFilter: "blur(18px)",
-              boxShadow: "0 22px 60px -52px rgba(0,0,0,0.35)",
-            }}
+  background: "rgba(255,254,250,0.96)", // warmer + no gray veil
+  borderColor: "rgba(0,0,0,0.08)",
+  // backdropFilter removed for performance
+  boxShadow: "0 18px 48px -44px rgba(0,0,0,0.28)",
+}}
+
           >
             {/* DASHBOARD */}
             {view === "dashboard" && (
@@ -719,7 +721,7 @@ function VaultShell() {
                       <div
                         className="w-full overflow-hidden"
                         style={{
-                          borderRadius: 18,
+                          borderRadius: 8,
                           background: "rgba(255,255,255,0.70)",
                           border: `1px solid ${palette.line}`,
                           boxShadow: "0 26px 70px -56px rgba(0,0,0,0.55)",

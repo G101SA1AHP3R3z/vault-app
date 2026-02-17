@@ -83,7 +83,7 @@ export default function MediaCard({
       onPointerLeave={onPointerUp}
       className={`${aspect} overflow-hidden relative cursor-pointer group active:scale-[0.985] transition-transform`}
       style={{
-        borderRadius: 14,
+        borderRadius: 8,
         background: "rgba(255,255,255,0.70)",
         border: `1px solid ${palette.line}`,
         backdropFilter: "blur(14px)",
@@ -96,8 +96,10 @@ export default function MediaCard({
         <>
           <img
             src={src}
-            className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
+            className="w-full h-full object-cover md:group-hover:scale-[1.03] transition-transform duration-300
+"
             alt=""
+	    decoding="async"
             loading="lazy"
             draggable={false}
           />

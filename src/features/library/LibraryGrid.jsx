@@ -53,7 +53,7 @@ export default function LibraryGrid({ onQuickAdd }) {
               <div
                 className="overflow-hidden relative"
                 style={{
-                  borderRadius: 16,
+                  borderRadius: 8,
                   background: "rgba(255,255,255,0.70)",
                   border: `1px solid ${palette.line}`,
                   backdropFilter: "blur(14px)",
