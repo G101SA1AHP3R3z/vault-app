@@ -17,7 +17,7 @@ function clamp01(n) {
 export default function MediaViewer({
   mode = "modal",
   project,
-  media, // expects { id, url, sessionId, hotspots: [] }
+  media,
   headerFont,
   palette,
   mediaIndex = 0,
@@ -32,7 +32,6 @@ export default function MediaViewer({
   onDeleteMedia,
   onSwipeDown,
 
-  // Pin CRUD
   onAddHotspot,
   onUpdateHotspot,
   onDeleteHotspot,
@@ -48,6 +47,7 @@ export default function MediaViewer({
   const [pinTarget, setPinTarget] = useState(null);
 
   const stageRef = useRef(null);
+  const carouselRef = useRef(null);
   const trashRef = useRef(null);
 
   const currentHotspots = Array.isArray(media?.hotspots) ? media.hotspots : [];
@@ -70,7 +70,6 @@ export default function MediaViewer({
     };
   }, [media?.id, moreFromSession]);
 
-  // Preload neighbors
   useEffect(() => {
     if (!media?.id) return;
     if (!Array.isArray(moreFromSession) || moreFromSession.length < 2) return;
@@ -90,7 +89,6 @@ export default function MediaViewer({
     });
   }, [media?.id, moreFromSession]);
 
-  // Reset UI on media change
   useEffect(() => {
     setIsAddPinMode(false);
     setIsFocusMode(false);
@@ -101,6 +99,7 @@ export default function MediaViewer({
     enabled: true,
     isBlocked: isAddPinMode,
     stageRef,
+    carouselRef,
     canPrev: neighbors.canPrev,
     canNext: neighbors.canNext,
     onPrev: () => onPrev?.(),
@@ -211,12 +210,11 @@ export default function MediaViewer({
         <MediaStage
           isEmbedded={isEmbedded}
           stageRef={stageRef}
+          carouselRef={carouselRef}
           trashRef={trashRef}
           media={media}
           prevSrc={neighbors.prevSrc}
           nextSrc={neighbors.nextSrc}
-          dragX={swipe.displayX}
-          isDragging={swipe.isDragging}
           palette={palette}
           isAddPinMode={isAddPinMode}
           isFocusMode={isFocusMode}
@@ -234,9 +232,7 @@ export default function MediaViewer({
             setSelectedPinId(null);
             onBack?.();
           }}
-          // Gesture wiring: pin-drag wins. Swipe gets a single end call.
           onStagePointerDown={(e) => {
-            // Start swipe unless a pin drag is beginning
             swipe.onPointerDown(e);
           }}
           onStagePointerMove={(e) => {
@@ -250,13 +246,6 @@ export default function MediaViewer({
           onStagePointerCancel={(e) => {
             drag.onStagePointerUp?.(e);
             if (!drag.draggingPinId) swipe.onPointerEnd(e);
-          }}
-          onTouchStart={swipe.onTouchStart}
-          onTouchMove={(e) => {
-            if (!drag.draggingPinId) swipe.onTouchMove(e);
-          }}
-          onTouchEnd={(e) => {
-            if (!drag.draggingPinId) swipe.onTouchEnd(e);
           }}
         />
 

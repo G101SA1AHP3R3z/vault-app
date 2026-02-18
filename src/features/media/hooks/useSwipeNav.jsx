@@ -1,19 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * iOS-like swipe with interactive drag + edge resistance + spring settle.
- *
- * - Horizontal drag exposes displayX for a carousel translate.
- * - On release: commit to next/prev (slide offscreen then call onNext/onPrev)
- *   or spring back (slight overshoot then settle to 0).
- * - Vertical swipe down triggers onSwipeDown.
- *
- * IMPORTANT:
- * - Only call onPointerEnd once (from pointerup/cancel).
- * - Pass canPrev/canNext so we can rubber-band at edges.
+ * Bypasses React state for 60fps native-feeling dragging via a DOM ref.
  */
 export default function useSwipeNav({
   enabled = true,
+  carouselRef,
   onPrev,
   onNext,
   onSwipeDown,
@@ -28,25 +21,22 @@ export default function useSwipeNav({
     x0: 0,
     y0: 0,
     t0: 0,
-    axis: null, // 'x' | 'y' | null
+    axis: null,
     pointerId: null,
     lastDx: 0,
   });
 
-  const [dragX, setDragX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
-  const [isSettling, setIsSettling] = useState(false);
-  const [settleX, setSettleX] = useState(0);
-  const [direction, setDirection] = useState(0); // -1 prev, +1 next
-
-  const displayX = useMemo(
-    () => (isSettling ? settleX : dragX),
-    [dragX, isSettling, settleX]
-  );
 
   const getStageWidth = () => {
     const w = stageRef?.current?.clientWidth;
     return typeof w === "number" && w > 0 ? w : window.innerWidth;
+  };
+
+  const setTransform = (x, transition = "none") => {
+    if (!carouselRef?.current) return;
+    carouselRef.current.style.transition = transition;
+    carouselRef.current.style.transform = `translate3d(${x}px, 0, 0)`;
   };
 
   const reset = () => {
@@ -54,12 +44,8 @@ export default function useSwipeNav({
     swipeRef.current.axis = null;
     swipeRef.current.pointerId = null;
     swipeRef.current.lastDx = 0;
-
-    setDragX(0);
     setIsDragging(false);
-    setIsSettling(false);
-    setSettleX(0);
-    setDirection(0);
+    setTransform(0, "none");
   };
 
   useEffect(() => {
@@ -67,18 +53,15 @@ export default function useSwipeNav({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isBlocked]);
 
-  // iOS-ish rubber band curve
   const rubberBand = (dx, dimension) => {
     const d = Math.abs(dx);
     const sign = dx < 0 ? -1 : 1;
-    const c = dimension * 0.55; // how "stretchy"
-    // (c*d)/(c+d) gives diminishing returns
+    const c = dimension * 0.55;
     return sign * ((c * d) / (c + d));
   };
 
   const onPointerDown = (e) => {
     if (!enabled || isBlocked) return;
-    if (isSettling) return;
 
     const x = e.clientX ?? e.touches?.[0]?.clientX;
     const y = e.clientY ?? e.touches?.[0]?.clientY;
@@ -93,12 +76,8 @@ export default function useSwipeNav({
     swipeRef.current.lastDx = 0;
 
     setIsDragging(true);
-    setIsSettling(false);
-    setDragX(0);
-    setSettleX(0);
-    setDirection(0);
+    setTransform(0, "none");
 
-    // Capture pointer so move/up stay consistent
     try {
       e.currentTarget?.setPointerCapture?.(e.pointerId);
     } catch {}
@@ -107,7 +86,6 @@ export default function useSwipeNav({
   const onPointerMove = (e) => {
     if (!enabled || isBlocked) return;
     if (!swipeRef.current.down) return;
-    if (isSettling) return;
 
     const x = e.clientX ?? e.touches?.[0]?.clientX;
     const y = e.clientY ?? e.touches?.[0]?.clientY;
@@ -116,7 +94,6 @@ export default function useSwipeNav({
     let dx = x - swipeRef.current.x0;
     const dy = y - swipeRef.current.y0;
 
-    // Decide axis after small movement
     if (!swipeRef.current.axis) {
       const adx = Math.abs(dx);
       const ady = Math.abs(dy);
@@ -125,14 +102,11 @@ export default function useSwipeNav({
     }
 
     if (swipeRef.current.axis === "y") {
-      setDragX(0);
-      setDirection(0);
+      setTransform(0, "none");
       return;
     }
 
     const w = getStageWidth();
-
-    // Edge resistance (rubber band) when there's no neighbor
     const goingPrev = dx > 0;
     const goingNext = dx < 0;
 
@@ -140,45 +114,41 @@ export default function useSwipeNav({
       dx = rubberBand(dx, w);
     }
 
-    // Clamp a little so it doesn't go insane
     const max = Math.max(80, w * 0.95);
     const clamped = Math.max(-max, Math.min(max, dx));
 
     swipeRef.current.lastDx = clamped;
-    setDragX(clamped);
-    setDirection(clamped < 0 ? 1 : clamped > 0 ? -1 : 0);
+    
+    // Direct DOM injection to bypass React render frame drops
+    setTransform(clamped, "none");
   };
 
   const springBack = (fromDx) => {
-    // two-step settle: small overshoot then 0
-    setIsSettling(true);
+    setIsDragging(false);
+    const overshoot = Math.max(-32, Math.min(32, -fromDx * 0.08));
 
-    const overshoot = Math.max(-32, Math.min(32, -fromDx * 0.08)); // opposite direction
-    setSettleX(overshoot);
-
-    // Kick to 0 next frame + timeout for a soft bounce
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        setSettleX(0);
-      }, 90);
-    });
+    setTransform(overshoot, `transform ${animationMs * 0.6}ms cubic-bezier(0.22, 1, 0.36, 1)`);
 
     setTimeout(() => {
-      reset();
-    }, animationMs + 80);
+      setTransform(0, `transform ${animationMs * 0.4}ms ease-out`);
+      setTimeout(() => {
+        reset();
+      }, animationMs * 0.4 + 20);
+    }, animationMs * 0.6 + 20);
   };
 
   const commitSlide = (dir, w) => {
-    // dir: +1 next (slide left), -1 prev (slide right)
-    setDirection(dir);
-    setIsSettling(true);
-    setSettleX(dir === 1 ? -w : w);
+    setIsDragging(false);
+    const targetX = dir === 1 ? -w : w;
 
+    setTransform(targetX, `transform ${animationMs}ms cubic-bezier(0.22, 1, 0.36, 1)`);
+
+    // Buffer ensures CSS transition absolutely finishes before snapping back data
     setTimeout(() => {
       if (dir === 1) onNext?.();
       else onPrev?.();
       reset();
-    }, animationMs);
+    }, animationMs + 20);
   };
 
   const onPointerEnd = (e) => {
@@ -201,14 +171,12 @@ export default function useSwipeNav({
     const dx = x == null ? swipeRef.current.lastDx : x - swipeRef.current.x0;
     const dy = y == null ? 0 : y - swipeRef.current.y0;
 
-    // Vertical swipe down -> close
     if (dy > 90 && Math.abs(dy) > Math.abs(dx) * 1.25) {
       reset();
       onSwipeDown?.();
       return;
     }
 
-    // If it was a vertical gesture, just reset.
     if (swipeRef.current.axis === "y") {
       reset();
       return;
@@ -216,12 +184,11 @@ export default function useSwipeNav({
 
     const w = getStageWidth();
     const dt = Math.max(1, performance.now() - swipeRef.current.t0);
-    const v = dx / dt; // px/ms
+    const v = dx / dt;
 
     const goingNext = dx < 0;
     const goingPrev = dx > 0;
 
-    // Don't commit into a missing neighbor
     if ((goingNext && !canNext) || (goingPrev && !canPrev)) {
       springBack(dx);
       return;
@@ -237,7 +204,7 @@ export default function useSwipeNav({
       return;
     }
 
-    const dir = dx < 0 ? 1 : -1; // drag left => next
+    const dir = dx < 0 ? 1 : -1;
     commitSlide(dir, w);
   };
 
@@ -245,17 +212,6 @@ export default function useSwipeNav({
     onPointerDown,
     onPointerMove,
     onPointerEnd,
-
-    // touch aliases (mobile browsers sometimes prefer these)
-    onTouchStart: onPointerDown,
-    onTouchMove: onPointerMove,
-    onTouchEnd: onPointerEnd,
-
-    // state for carousel
-    dragX,
-    displayX,
-    direction,
     isDragging,
-    isSettling,
   };
 }

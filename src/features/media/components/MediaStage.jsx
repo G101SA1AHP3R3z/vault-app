@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { ChevronLeft, Trash2 } from "lucide-react";
 
 function clamp01(n) {
@@ -8,45 +8,30 @@ function clamp01(n) {
 }
 
 export default function MediaStage({
-  // layout
   isEmbedded,
   headerHeightMax = "72vh",
-
-  // refs
+  
   stageRef,
+  carouselRef,
   trashRef,
 
-  // media
   media,
   prevSrc = "",
   nextSrc = "",
 
-  // interactive carousel state
-  dragX = 0,
-  isDragging = false,
-
-  // chrome actions
   onBack,
   onDeleteMedia,
 
-  // modes
   isAddPinMode,
   isFocusMode,
 
-  // swipe / drag handlers
   onStagePointerDown,
   onStagePointerMove,
-  onStagePointerUp, // should end gesture once
+  onStagePointerUp,
   onStagePointerCancel,
 
-  onTouchStart,
-  onTouchMove,
-  onTouchEnd,
-
-  // add pin
   onClickToAddPin,
 
-  // pins
   hotspots = [],
   selectedPin,
   palette,
@@ -57,43 +42,10 @@ export default function MediaStage({
 }) {
   const currentSrc = media?.url || "";
 
-  const [stageWidth, setStageWidth] = useState(0);
-
-  useEffect(() => {
-    const el = stageRef?.current;
-    if (!el) return;
-
-    const update = () => setStageWidth(el.clientWidth || 0);
-    update();
-
-    let ro = null;
-    if (typeof ResizeObserver !== "undefined") {
-      ro = new ResizeObserver(() => update());
-      ro.observe(el);
-    } else {
-      window.addEventListener("resize", update);
-    }
-
-    return () => {
-      if (ro) ro.disconnect();
-      else window.removeEventListener("resize", update);
-    };
-  }, [stageRef]);
-
   const stageHeight = useMemo(
     () => (isEmbedded ? "62vh" : headerHeightMax),
     [isEmbedded, headerHeightMax]
   );
-
-  const w = stageWidth || 1;
-  const progress = Math.min(1, Math.abs(dragX) / w);
-  const transition = isDragging
-    ? "none"
-    : "transform 240ms cubic-bezier(0.22, 1, 0.36, 1)";
-
-  const prevX = -w + dragX;
-  const curX = dragX;
-  const nextX = w + dragX;
 
   const showPrev = Boolean(prevSrc);
   const showNext = Boolean(nextSrc);
@@ -102,7 +54,7 @@ export default function MediaStage({
     <div className={isEmbedded ? "w-full" : "w-full"}>
       <div
         ref={stageRef}
-        className={`relative w-full overflow-hidden ${
+        className={`relative w-full overflow-hidden bg-black/5 ${
           isAddPinMode && !isFocusMode ? "cursor-crosshair" : ""
         }`}
         style={{ touchAction: "pan-y", height: stageHeight }}
@@ -111,9 +63,6 @@ export default function MediaStage({
         onPointerMove={onStagePointerMove}
         onPointerUp={onStagePointerUp}
         onPointerCancel={onStagePointerCancel}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
       >
         {/* Back */}
         {!isEmbedded && (
@@ -138,19 +87,15 @@ export default function MediaStage({
           </button>
         )}
 
-        {/* Interactive carousel panels */}
-        <div className="absolute inset-0" style={{ pointerEvents: "none" }}>
-          {/* Prev */}
-          <div
-            className="absolute inset-0"
-            style={{
-              transform: `translate3d(${prevX}px,0,0)`,
-              transition,
-              willChange: "transform",
-              opacity: showPrev ? 1 : 0,
-            }}
-          >
-            {showPrev ? (
+        {/* NATIVE CAROUSEL WRAPPER */}
+        <div
+          ref={carouselRef}
+          className="absolute inset-0 w-full h-full"
+          style={{ willChange: "transform" }}
+        >
+          {/* Prev Photo */}
+          <div className="absolute inset-0 w-full h-full" style={{ left: "-100%" }}>
+            {showPrev && (
               <img
                 src={prevSrc}
                 decoding="async"
@@ -159,20 +104,12 @@ export default function MediaStage({
                 alt=""
                 draggable={false}
               />
-            ) : null}
+            )}
           </div>
 
-          {/* Current */}
-          <div
-            className="absolute inset-0"
-            style={{
-              transform: `translate3d(${curX}px,0,0)`,
-              transition,
-              willChange: "transform",
-              filter: progress > 0.02 ? `brightness(${1 - 0.04 * progress})` : "none",
-            }}
-          >
-            {currentSrc ? (
+          {/* Current Photo & Pins */}
+          <div className="absolute inset-0 w-full h-full" style={{ left: "0%" }}>
+            {currentSrc && (
               <img
                 src={currentSrc}
                 decoding="async"
@@ -183,20 +120,63 @@ export default function MediaStage({
                 alt=""
                 draggable={false}
               />
-            ) : null}
+            )}
+
+            {/* Pins bound directly to the middle slide so they swipe gracefully */}
+            {!isFocusMode &&
+              hotspots.map((h, idx) => {
+                const { x, y } = getDisplayXY
+                  ? getDisplayXY(h)
+                  : { x: clamp01(h.x), y: clamp01(h.y) };
+                const left = `${x * 100}%`;
+                const top = `${y * 100}%`;
+                const number = idx + 1;
+                const isSelected = (selectedPin?.id || null) === h.id;
+
+                return (
+                  <button
+                    key={h.id}
+                    type="button"
+                    onPointerDown={(e) => onPinPointerDown?.(e, h)}
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 select-none touch-none
+                      transition-transform duration-150 ease-out
+                      ${
+                        isAddPinMode
+                          ? "pointer-events-none opacity-25 scale-90"
+                          : "pointer-events-auto"
+                      }
+                      ${draggingPinId === h.id ? "scale-[1.10] z-50" : "z-10 hover:scale-[1.03]"}
+                    `}
+                    style={{
+                      left,
+                      top,
+                      WebkitTouchCallout: "none",
+                      WebkitUserSelect: "none",
+                      userSelect: "none",
+                    }}
+                    aria-label="Pin"
+                  >
+                    <div
+                      className="w-9 h-9 rounded-full text-xs font-semibold flex items-center justify-center shadow-[0_12px_30px_-18px_rgba(0,0,0,0.35)]"
+                      style={{
+                        pointerEvents: "none",
+                        background: "rgba(255,255,255,0.95)",
+                        color: "rgba(0,0,0,0.75)",
+                        border: isSelected
+                          ? `2px solid ${palette?.sun || "#FFEA3A"}`
+                          : `1px solid ${palette?.pinEdge || "rgba(0,0,0,0.12)"}`,
+                      }}
+                    >
+                      {number}
+                    </div>
+                  </button>
+                );
+              })}
           </div>
 
-          {/* Next */}
-          <div
-            className="absolute inset-0"
-            style={{
-              transform: `translate3d(${nextX}px,0,0)`,
-              transition,
-              willChange: "transform",
-              opacity: showNext ? 1 : 0,
-            }}
-          >
-            {showNext ? (
+          {/* Next Photo */}
+          <div className="absolute inset-0 w-full h-full" style={{ left: "100%" }}>
+            {showNext && (
               <img
                 src={nextSrc}
                 decoding="async"
@@ -205,66 +185,15 @@ export default function MediaStage({
                 alt=""
                 draggable={false}
               />
-            ) : null}
+            )}
           </div>
         </div>
 
-        {/* Pins */}
-        {!isFocusMode &&
-          hotspots.map((h, idx) => {
-            const { x, y } = getDisplayXY
-              ? getDisplayXY(h)
-              : { x: clamp01(h.x), y: clamp01(h.y) };
-            const left = `${x * 100}%`;
-            const top = `${y * 100}%`;
-            const number = idx + 1;
-            const isSelected = (selectedPin?.id || null) === h.id;
-
-            return (
-              <button
-                key={h.id}
-                type="button"
-                onPointerDown={(e) => onPinPointerDown?.(e, h)}
-                className={`absolute -translate-x-1/2 -translate-y-1/2 select-none touch-none
-                  transition-transform duration-150 ease-out
-                  ${
-                    isAddPinMode
-                      ? "pointer-events-none opacity-25 scale-90"
-                      : "pointer-events-auto"
-                  }
-                  ${draggingPinId === h.id ? "scale-[1.10] z-50" : "z-10 hover:scale-[1.03]"}
-                `}
-                style={{
-                  left,
-                  top,
-                  WebkitTouchCallout: "none",
-                  WebkitUserSelect: "none",
-                  userSelect: "none",
-                }}
-                aria-label="Pin"
-              >
-                <div
-                  className="w-9 h-9 rounded-full text-xs font-semibold flex items-center justify-center shadow-[0_12px_30px_-18px_rgba(0,0,0,0.35)]"
-                  style={{
-                    pointerEvents: "none",
-                    background: "rgba(255,255,255,0.95)",
-                    color: "rgba(0,0,0,0.75)",
-                    border: isSelected
-                      ? `2px solid ${palette?.sun || "#FFEA3A"}`
-                      : `1px solid ${palette?.pinEdge || "rgba(0,0,0,0.12)"}`,
-                  }}
-                >
-                  {number}
-                </div>
-              </button>
-            );
-          })}
-
-        {/* Trash drop zone (only while dragging) */}
+        {/* Trash drop zone stays outside the slider so it doesn't move */}
         {!isFocusMode && (
           <div
             ref={trashRef}
-            className={`absolute bottom-6 left-1/2 -translate-x-1/2 transition-all duration-200 ease-out ${
+            className={`absolute bottom-6 left-1/2 -translate-x-1/2 transition-all duration-200 ease-out z-50 ${
               draggingPinId
                 ? "opacity-100 translate-y-0 scale-100"
                 : "opacity-0 translate-y-3 scale-95 pointer-events-none"
