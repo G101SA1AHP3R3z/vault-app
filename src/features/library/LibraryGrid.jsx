@@ -88,7 +88,7 @@ function KebabMenu({ items = [], palette }) {
   );
 }
 
-export default function LibraryGrid({ onQuickAdd, onNew }) {
+export default function LibraryGrid({ onQuickAdd, onNew, title = "[ Projects ]" }) {
   const { filteredProjects, setActiveProject, setView, renameProject, deleteProject, createInvite } =
     useVault();
 
@@ -152,8 +152,8 @@ export default function LibraryGrid({ onQuickAdd, onNew }) {
       {/* Header (match screenshot) */}
       <div className="px-6 pt-6 pb-5 flex items-center justify-between">
         <div className="text-[18px] font-semibold tracking-[0.02em]" style={{ color: palette.ink }}>
-          [ Projects ]
-        </div>
+  {title}
+</div>
 
         <button
           onClick={() => onNew?.()}
