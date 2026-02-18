@@ -182,25 +182,86 @@ export function VaultProvider({ children }) {
     return { id: docRef.id, ...newProject };
   };
 
-  const deleteProject = async (projectId) => {
-    if (!user?.uid || !projectId) return;
+ const deleteProject = async (projectId) => {
+  if (!user?.uid || !projectId) return;
 
-    const proj = projects.find((p) => p.id === projectId) || activeProject;
-    if (proj && !isOwner(proj)) {
-      throw new Error("Only the owner can delete this project.");
-    }
+  const proj = projects.find((p) => p.id === projectId) || activeProject;
+  if (proj && !isOwner(proj)) {
+    throw new Error("Only the owner can delete this project.");
+  }
 
-    await deleteDoc(doc(db, "projects", projectId));
+  const projectRef = doc(db, "projects", projectId);
 
-    // ✅ immediately remove from UI
-    setProjects((prev) => prev.filter((p) => p.id !== projectId));
+  // Soft-delete → send to Graveyard instead of deleting the doc
+  await updateDoc(projectRef, {
+    status: "graveyard",
+    deletedAt: serverTimestamp(),
+    archivedAt: serverTimestamp(), // optional: keeps “archive/deleted” consistent
+  });
 
-    if (activeProject?.id === projectId) {
-      setActiveProject(null);
-      setActiveMedia(null);
-      setView("dashboard");
-    }
-  };
+  // ✅ optimistic local update
+  applyProjectPatchLocal(projectId, {
+    status: "graveyard",
+    deletedAt: { seconds: Math.floor(Date.now() / 1000) },
+    archivedAt: { seconds: Math.floor(Date.now() / 1000) },
+  });
+
+  // If you were inside it, exit back to dashboard
+  if (activeProject?.id === projectId) {
+    setActiveProject(null);
+    setActiveMedia(null);
+    setView("dashboard");
+    setTab("graveyard"); // optional: jump user to graveyard so they SEE it
+  }
+};
+
+const archiveProject = async (projectId) => {
+  if (!user?.uid || !projectId) return;
+
+  const proj = projects.find((p) => p.id === projectId) || activeProject;
+  if (proj && !isOwner(proj)) {
+    throw new Error("Only the owner can archive this project.");
+  }
+
+  const projectRef = doc(db, "projects", projectId);
+  await updateDoc(projectRef, {
+    status: "graveyard",
+    archivedAt: serverTimestamp(),
+  });
+
+  applyProjectPatchLocal(projectId, {
+    status: "graveyard",
+    archivedAt: { seconds: Math.floor(Date.now() / 1000) },
+  });
+
+  if (activeProject?.id === projectId) {
+    setActiveProject(null);
+    setActiveMedia(null);
+    setView("dashboard");
+    setTab("graveyard");
+  }
+};
+
+const restoreProject = async (projectId) => {
+  if (!user?.uid || !projectId) return;
+
+  const proj = projects.find((p) => p.id === projectId) || activeProject;
+  if (proj && !isOwner(proj)) {
+    throw new Error("Only the owner can restore this project.");
+  }
+
+  const projectRef = doc(db, "projects", projectId);
+  await updateDoc(projectRef, {
+    status: "active",
+    restoredAt: serverTimestamp(),
+  });
+
+  applyProjectPatchLocal(projectId, {
+    status: "active",
+    restoredAt: { seconds: Math.floor(Date.now() / 1000) },
+  });
+};
+
 
   const renameProject = async (projectId, nextTitle) => {
     if (!user?.uid || !projectId) return;
@@ -436,7 +497,9 @@ export function VaultProvider({ children }) {
     }
 
     // upload in parallel (you cap at 5 in UI anyway)
-    const uploadedMedia = await Promise.all(list.slice(0, 5).map((f) => uploadSingleToStorage(projectId, f)));
+    const uploadedMedia = await Promise.all(
+      list.slice(0, 5).map((f) => uploadSingleToStorage(projectId, f))
+    );
 
     const projectRef = doc(db, "projects", projectId);
     const snap = await getDoc(projectRef);
@@ -723,7 +786,6 @@ export function VaultProvider({ children }) {
     setActiveMedia,
     search,
     setSearch,
-
     filteredProjects,
 
     // permissions helpers
@@ -735,6 +797,8 @@ export function VaultProvider({ children }) {
     addProject,
     renameProject,
     deleteProject,
+    archiveProject,
+    restoreProject,
     leaveProject,
 
     // sharing

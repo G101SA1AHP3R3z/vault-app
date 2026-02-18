@@ -1,19 +1,12 @@
 // /src/features/media/MediaViewer.jsx
-import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
-import {
-  ChevronLeft,
-  Trash2,
-  Pencil,
-  MapPin,
-  Maximize2,
-  Minimize2,
-  StickyNote,
-  Edit3,
-  Share2,
-  MoreHorizontal,
-  Heart,
-} from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import PinEditorModal from "../../components/PinEditorModal";
+
+import useSwipeNav from "./hooks/useSwipeNav";
+import usePinDrag from "./hooks/usePinDrag";
+
+import MediaStage from "./components/MediaStage";
+import PinNotesPanel from "./components/PinNotesPanel";
 
 function clamp01(n) {
   const x = Number(n);
@@ -21,20 +14,6 @@ function clamp01(n) {
   return Math.max(0, Math.min(1, x));
 }
 
-/**
- * MediaViewer
- * mode:
- *  - "modal" (default): fixed fullscreen viewer
- *  - "embedded": renders as a normal block (no fixed overlay). Used inside Project view.
- *
- * Swipe:
- *  - Horizontal: prev/next (onPrev/onNext)
- *  - Vertical (down): onSwipeDown()
- *
- * Smoothness:
- *  - Crossfade between images so swipe doesn't “blank” while loading/decoding
- *  - When entering Add Pin mode, auto-scroll image into view (prevents ugly “collapsed” interim state)
- */
 export default function MediaViewer({
   mode = "modal",
   project,
@@ -43,6 +22,10 @@ export default function MediaViewer({
   palette,
   mediaIndex = 0,
   mediaCount = 0,
+
+  moreFromSession = [],
+  onSelectMedia,
+
   onBack,
   onPrev,
   onNext,
@@ -56,113 +39,50 @@ export default function MediaViewer({
 }) {
   const isEmbedded = mode === "embedded";
 
-  // Pins
+  // Modes
   const [isAddPinMode, setIsAddPinMode] = useState(false);
+  const [isFocusMode, setIsFocusMode] = useState(false); // kept for compatibility
   const [selectedPinId, setSelectedPinId] = useState(null);
-
-  // Focus mode (full-bleed image, no pins, no panel)
-  const [isFocusMode, setIsFocusMode] = useState(false);
 
   // Pin editor modal
   const [pinOpen, setPinOpen] = useState(false);
   const [pinDraft, setPinDraft] = useState({ label: "", note: "" });
   const [pinTarget, setPinTarget] = useState(null);
 
-  // Drag & trash logic
-  const [draggingPinId, setDraggingPinId] = useState(null);
-  const [optimisticPin, setOptimisticPin] = useState(null);
-  const [isHoveringTrash, setIsHoveringTrash] = useState(false);
-
-  const dragRef = useRef({
-    dragging: false,
-    hotspotId: null,
-    startX: 0,
-    startY: 0,
-    timer: null,
-  });
-
   const stageRef = useRef(null);
   const trashRef = useRef(null);
 
-  // Swipe nav
-  const swipeRef = useRef({ down: false, x0: 0, y0: 0 });
-
-  // -----------------------------
-  // Smooth image swap (crossfade)
-  // -----------------------------
-  const [displaySrc, setDisplaySrc] = useState(media?.url || "");
-  const [nextSrc, setNextSrc] = useState(null);
-  const [nextLoaded, setNextLoaded] = useState(false);
-
-  useEffect(() => {
-    const url = media?.url || "";
-    if (!url) {
-      setDisplaySrc("");
-      setNextSrc(null);
-      setNextLoaded(false);
-      return;
-    }
-
-    // first mount or same url → set directly
-    if (!displaySrc) {
-      setDisplaySrc(url);
-      setNextSrc(null);
-      setNextLoaded(false);
-      return;
-    }
-    if (url === displaySrc) {
-      setNextSrc(null);
-      setNextLoaded(false);
-      return;
-    }
-
-    // start loading next image; keep old visible until loaded
-    setNextSrc(url);
-    setNextLoaded(false);
-
-    const img = new Image();
-    img.decoding = "async";
-    img.src = url;
-    img.onload = () => setNextLoaded(true);
-    img.onerror = () => {
-      // if it errors, just try to swap so user isn't stuck
-      setNextLoaded(true);
-    };
-
-    return () => {
-      img.onload = null;
-      img.onerror = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [media?.url]);
-
-  const finalizeSwap = useCallback(() => {
-    if (!nextSrc) return;
-    setDisplaySrc(nextSrc);
-    setNextSrc(null);
-    setNextLoaded(false);
-  }, [nextSrc]);
-
-  // -----------------------------
-  // Pins + selection
-  // -----------------------------
   const currentHotspots = Array.isArray(media?.hotspots) ? media.hotspots : [];
 
-  const selectedPin = useMemo(() => {
-    if (!currentHotspots.length) return null;
-    const found = selectedPinId ? currentHotspots.find((h) => h.id === selectedPinId) : null;
-    return found || currentHotspots[0] || null;
-  }, [currentHotspots, selectedPinId]);
-
-  // Reset modes when media changes
+  // Reset on media change
   useEffect(() => {
     setIsAddPinMode(false);
     setIsFocusMode(false);
     setSelectedPinId(null);
-    setDraggingPinId(null);
-    setOptimisticPin(null);
-    setIsHoveringTrash(false);
   }, [media?.id]);
+
+  const swipe = useSwipeNav({
+    enabled: true,
+    isBlocked: isAddPinMode, // match your old behavior
+    onPrev,
+    onNext,
+    onSwipeDown,
+  });
+
+  const drag = usePinDrag({
+    projectId: project?.id,
+    mediaId: media?.id,
+    sessionId: media?.sessionId,
+    hotspots: currentHotspots,
+    stageRef,
+    trashRef,
+    isFocusMode,
+    isAddPinMode,
+    onUpdateHotspot,
+    onDeleteHotspot,
+    selectedPinId,
+    setSelectedPinId,
+  });
 
   const openPinEditor = (hotspot) => {
     if (!hotspot?.id) return;
@@ -177,7 +97,6 @@ export default function MediaViewer({
 
   const savePinEdits = async (nextDraft) => {
     if (!project?.id || !pinTarget) return;
-
     try {
       await onUpdateHotspot?.(
         project.id,
@@ -242,685 +161,62 @@ export default function MediaViewer({
     }
   };
 
-  const onPinPointerDown = (e, hotspot) => {
-    if (isFocusMode) return;
-
-    // Tap selects (no editor)
-    setSelectedPinId(hotspot.id);
-
-    // Long press to drag
-    e.preventDefault();
-    e.stopPropagation();
-
-    dragRef.current.hotspotId = hotspot.id;
-    dragRef.current.startX = e.clientX;
-    dragRef.current.startY = e.clientY;
-    dragRef.current.dragging = false;
-
-    try {
-      e.currentTarget.setPointerCapture?.(e.pointerId);
-    } catch {}
-
-    dragRef.current.timer = setTimeout(() => {
-      dragRef.current.dragging = true;
-      setDraggingPinId(hotspot.id);
-      setOptimisticPin({ id: hotspot.id, x: hotspot.x, y: hotspot.y });
-    }, 450);
-  };
-
-  const onStagePointerMove = (e) => {
-    if (!dragRef.current.hotspotId) return;
-
-    if (!dragRef.current.dragging) {
-      const dx = Math.abs(e.clientX - dragRef.current.startX);
-      const dy = Math.abs(e.clientY - dragRef.current.startY);
-      if (dx > 10 || dy > 10) {
-        clearTimeout(dragRef.current.timer);
-        dragRef.current.timer = null;
-        dragRef.current.hotspotId = null;
-      }
-      return;
-    }
-
-    if (!stageRef.current) return;
-
-    const rect = stageRef.current.getBoundingClientRect();
-    const clientX = e.clientX ?? e.touches?.[0]?.clientX;
-    const clientY = e.clientY ?? e.touches?.[0]?.clientY;
-
-    const x = clamp01((clientX - rect.left) / rect.width);
-    const y = clamp01((clientY - rect.top) / rect.height);
-    setOptimisticPin({ id: dragRef.current.hotspotId, x, y });
-
-    if (trashRef.current) {
-      const tRect = trashRef.current.getBoundingClientRect();
-      const hovering =
-        clientX >= tRect.left &&
-        clientX <= tRect.right &&
-        clientY >= tRect.top &&
-        clientY <= tRect.bottom;
-
-      setIsHoveringTrash(hovering);
-    }
-  };
-
-  const onStagePointerUp = async (e) => {
-    if (dragRef.current.timer) {
-      clearTimeout(dragRef.current.timer);
-      dragRef.current.timer = null;
-    }
-
-    const hotspotId = dragRef.current.hotspotId;
-    const wasDragging = dragRef.current.dragging;
-
-    const clientX = e.clientX ?? e.changedTouches?.[0]?.clientX;
-    const clientY = e.clientY ?? e.changedTouches?.[0]?.clientY;
-
-    let droppedInTrash = false;
-    if (wasDragging && trashRef.current && clientX != null && clientY != null) {
-      const tRect = trashRef.current.getBoundingClientRect();
-      droppedInTrash =
-        clientX >= tRect.left &&
-        clientX <= tRect.right &&
-        clientY >= tRect.top &&
-        clientY <= tRect.bottom;
-    }
-
-    dragRef.current.hotspotId = null;
-    dragRef.current.dragging = false;
-    setDraggingPinId(null);
-    setIsHoveringTrash(false);
-
-    const pinDataToSave = optimisticPin;
-    setOptimisticPin(null);
-
-    if (!hotspotId) return;
-    if (!wasDragging) return;
-
-    if (droppedInTrash && project?.id && media?.id) {
-      try {
-        await onDeleteHotspot?.(project.id, media.sessionId, media.id, hotspotId);
-      } catch (err) {
-        console.error("Failed to delete pin:", err);
-      }
-      return;
-    }
-
-    if (pinDataToSave && project?.id && media?.id) {
-      try {
-        await onUpdateHotspot?.(
-          project.id,
-          media.sessionId,
-          media.id,
-          hotspotId,
-          { x: pinDataToSave.x, y: pinDataToSave.y }
-        );
-      } catch (err) {
-        console.error("Failed to move pin:", err);
-      }
-    }
-  };
-
-  // -----------------------------
-  // Swipe: horizontal = prev/next, vertical down = close-to-grid
-  // -----------------------------
-  const onStagePointerDown = (e) => {
-    if (isAddPinMode) return;
-    const x = e.clientX ?? e.touches?.[0]?.clientX;
-    const y = e.clientY ?? e.touches?.[0]?.clientY;
-    if (x == null || y == null) return;
-    swipeRef.current = { down: true, x0: x, y0: y };
-  };
-
-  const onStagePointerEnd = (e) => {
-    if (isAddPinMode) return;
-    if (!swipeRef.current.down) return;
-
-    const x =
-      e.clientX ?? e.changedTouches?.[0]?.clientX ?? e.touches?.[0]?.clientX ?? null;
-    const y =
-      e.clientY ?? e.changedTouches?.[0]?.clientY ?? e.touches?.[0]?.clientY ?? null;
-
-    swipeRef.current.down = false;
-    if (x == null || y == null) return;
-
-    const dx = x - swipeRef.current.x0;
-    const dy = y - swipeRef.current.y0;
-
-    // Down swipe → close to grid (Pinterest)
-    if (dy > 90 && Math.abs(dy) > Math.abs(dx) * 1.25) {
-      onSwipeDown?.();
-      return;
-    }
-
-    // Horizontal swipe → next/prev
-    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.25) {
-      if (dx < 0) onNext?.();
-      else onPrev?.();
-    }
-  };
-
-  const canPrev = mediaIndex > 0;
-  const canNext = mediaIndex < Math.max(0, mediaCount - 1);
-
-  // -----------------------------
-  // Add-pin toggle (auto-scroll)
-  // -----------------------------
-  const toggleAddPin = () => {
-    if (isFocusMode) return;
-
-    setIsAddPinMode((v) => {
-      const next = !v;
-
-      // When entering add-pin mode, bring the image back into view to avoid the “collapsed” looking state
-      if (next && isEmbedded) {
-        requestAnimationFrame(() => {
-          stageRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-        });
-      }
-
-      return next;
-    });
-  };
-
   const Outer = ({ children }) => {
     if (isEmbedded) return <div className="w-full">{children}</div>;
-
-    return (
-      <div className="fixed inset-0 z-[100]" style={{ background: "#F4F4F5" }}>
-        {children}
-      </div>
-    );
+    return <div className="fixed inset-0 z-[100] bg-white">{children}</div>;
   };
 
   return (
     <Outer>
-      {/* Top bar (only in modal mode) */}
-      {!isEmbedded && (
-        <div className="absolute top-0 inset-x-0 z-50 px-4 pt-4 pb-3 sm:px-6 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setIsAddPinMode(false);
-                setIsFocusMode(false);
-                setSelectedPinId(null);
-                onBack?.();
-              }}
-              className="w-10 h-10 rounded-full bg-white/80 border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
-              aria-label="Back"
-            >
-              <ChevronLeft className="w-6 h-6" />
-            </button>
+      <div className={isEmbedded ? "w-full" : "h-full w-full overflow-y-auto"}>
+        <MediaStage
+          isEmbedded={isEmbedded}
+          stageRef={stageRef}
+          trashRef={trashRef}
+          media={media}
+          palette={palette}
+          isAddPinMode={isAddPinMode}
+          isFocusMode={isFocusMode}
+          selectedPin={drag.selectedPin}
+          hotspots={currentHotspots}
+          draggingPinId={drag.draggingPinId}
+          isHoveringTrash={drag.isHoveringTrash}
+          getDisplayXY={drag.getDisplayXY}
+          onPinPointerDown={drag.onPinPointerDown}
+          onClickToAddPin={handleStageClickToAddPin}
+          onDeleteMedia={onDeleteMedia}
+          onBack={() => {
+            setIsAddPinMode(false);
+            setIsFocusMode(false);
+            setSelectedPinId(null);
+            onBack?.();
+          }}
+          // swipe + drag
+          onStagePointerDown={swipe.onPointerDown}
+          onStagePointerEnd={swipe.onPointerEnd}
+          onStagePointerMove={drag.onStagePointerMove}
+          onStagePointerUp={drag.onStagePointerUp}
+          onTouchStart={swipe.onTouchStart}
+          onTouchEnd={swipe.onTouchEnd}
+        />
 
-            <button
-              onClick={() => {
-                const next = !isFocusMode;
-                setIsFocusMode(next);
-                setIsAddPinMode(false);
-                if (next) setSelectedPinId(null);
-              }}
-              className="h-10 px-3 rounded-full bg-white/80 border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out"
-              aria-label="Focus"
-            >
-              {isFocusMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-              <span className="text-xs font-semibold">{isFocusMode ? "Exit Focus" : "Focus"}</span>
-            </button>
-          </div>
-
-          <div className="hidden sm:flex items-center gap-2">
-            <button
-              onClick={onPrev}
-              disabled={!canPrev}
-              className="h-10 px-3 rounded-full bg-white/80 border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out disabled:opacity-40 disabled:cursor-not-allowed"
-              aria-label="Previous photo"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              <span className="text-xs font-semibold">Prev</span>
-            </button>
-
-            <button
-              onClick={onNext}
-              disabled={!canNext}
-              className="h-10 px-3 rounded-full bg-white/80 border border-black/10 text-black flex items-center gap-2 hover:bg-white transition-colors duration-200 ease-out disabled:opacity-40 disabled:cursor-not-allowed"
-              aria-label="Next photo"
-            >
-              <span className="text-xs font-semibold">Next</span>
-              <ChevronLeft className="w-4 h-4 rotate-180" />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              className="w-10 h-10 rounded-full bg-white/80 border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
-              aria-label="Save"
-              title="Save"
-              onClick={() => alert("Wire save later.")}
-            >
-              <Heart className="w-5 h-5" />
-            </button>
-
-            <button
-              className="w-10 h-10 rounded-full bg-white/80 border border-black/10 text-black flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
-              aria-label="Share"
-              title="Share"
-              onClick={() => alert("Wire share later.")}
-            >
-              <Share2 className="w-5 h-5" />
-            </button>
-
-            <button
-              onClick={onDeleteMedia}
-              className="w-10 h-10 rounded-full bg-white/80 border border-black/10 text-red-600 flex items-center justify-center hover:bg-white transition-colors duration-200 ease-out"
-              aria-label="Delete"
-            >
-              <Trash2 className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div
-        className={isEmbedded ? "w-full" : "h-full w-full grid"}
-        style={isEmbedded ? undefined : { gridTemplateRows: isFocusMode ? "1fr" : "minmax(0, 1fr) auto" }}
-      >
-        {/* IMAGE CARD */}
-        <div
-          className={
-            isEmbedded
-              ? "w-full"
-              : "min-h-0 flex items-center justify-center px-4 pt-20 pb-6 sm:px-6"
-          }
-        >
-          <div
-            className={isEmbedded ? "w-full" : "w-full max-w-5xl"}
-            style={{
-              borderRadius: 8,
-              background: "rgba(255,255,255,0.92)",
-              border: "1px solid rgba(0,0,0,0.08)",
-              boxShadow: "0 26px 70px -56px rgba(0,0,0,0.55)",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              ref={stageRef}
-              className={`relative w-full ${isAddPinMode && !isFocusMode ? "cursor-crosshair" : ""}`}
-              style={{ touchAction: "pan-y" }}
-              onClick={handleStageClickToAddPin}
-              onPointerDown={onStagePointerDown}
-              onPointerMove={onStagePointerMove}
-              onPointerUp={(e) => {
-                onStagePointerUp(e);
-                onStagePointerEnd(e);
-              }}
-              onPointerLeave={(e) => {
-                onStagePointerUp(e);
-                onStagePointerEnd(e);
-              }}
-              onTouchStart={onStagePointerDown}
-              onTouchEnd={onStagePointerEnd}
-            >
-              {/* Base image (stays visible) */}
-              <img
-                src={displaySrc || media?.url || ""}
-                decoding="async"
-                loading="eager"
-                className="w-full object-contain"
-                style={{
-                  pointerEvents: "none",
-                  maxHeight: isEmbedded ? "60vh" : "72vh",
-                  opacity: nextSrc ? 1 : 1,
-                }}
-                alt=""
-                draggable={false}
-              />
-
-              {/* Overlay image (crossfades in once loaded) */}
-              {nextSrc ? (
-                <img
-                  src={nextSrc}
-                  decoding="async"
-                  loading="eager"
-                  className="absolute inset-0 w-full h-full object-contain transition-opacity duration-200 ease-out"
-                  style={{
-                    pointerEvents: "none",
-                    opacity: nextLoaded ? 1 : 0,
-                    maxHeight: isEmbedded ? "60vh" : "72vh",
-                  }}
-                  alt=""
-                  draggable={false}
-                  onTransitionEnd={() => {
-                    // once fully visible, commit it as base
-                    if (nextLoaded) finalizeSwap();
-                  }}
-                />
-              ) : null}
-
-              {/* Pins */}
-              {!isFocusMode &&
-                currentHotspots.map((h, idx) => {
-                  const displayX = optimisticPin?.id === h.id ? optimisticPin.x : h.x;
-                  const displayY = optimisticPin?.id === h.id ? optimisticPin.y : h.y;
-
-                  const left = `${clamp01(displayX) * 100}%`;
-                  const top = `${clamp01(displayY) * 100}%`;
-                  const number = idx + 1;
-                  const isSelected = (selectedPin?.id || null) === h.id;
-
-                  return (
-                    <button
-                      key={h.id}
-                      type="button"
-                      onPointerDown={(e) => {
-                        if (!isAddPinMode) onPinPointerDown(e, h);
-                      }}
-                      className={`absolute -translate-x-1/2 -translate-y-1/2 select-none touch-none
-                        transition-transform duration-200 ease-out
-                        ${isAddPinMode ? "pointer-events-none opacity-25 scale-90" : "pointer-events-auto"}
-                        ${draggingPinId === h.id ? "scale-[1.10] z-50" : "z-10 hover:scale-[1.04]"}
-                      `}
-                      style={{
-                        left,
-                        top,
-                        WebkitTouchCallout: "none",
-                        WebkitUserSelect: "none",
-                        userSelect: "none",
-                      }}
-                      aria-label="Pin"
-                    >
-                      <div
-                        className="w-9 h-9 rounded-full text-xs font-bold flex items-center justify-center shadow-[0_14px_40px_-20px_rgba(0,0,0,0.35)]"
-                        style={{
-                          pointerEvents: "none",
-                          background: isSelected ? palette.sun : "rgba(255,255,255,0.92)",
-                          color: isSelected ? palette.ink : "#111",
-                          border: `1px solid ${palette.pinEdge || "rgba(0,0,0,0.14)"}`,
-                        }}
-                      >
-                        {number}
-                      </div>
-                    </button>
-                  );
-                })}
-
-              {/* Trash drop zone (only while dragging) */}
-              {!isFocusMode && (
-                <div
-                  ref={trashRef}
-                  className={`absolute bottom-6 left-1/2 -translate-x-1/2 transition-all duration-200 ease-out ${
-                    draggingPinId
-                      ? "opacity-100 translate-y-0 scale-100"
-                      : "opacity-0 translate-y-3 scale-95 pointer-events-none"
-                  }`}
-                >
-                  <div
-                    className="w-16 h-16 rounded-full flex items-center justify-center shadow-2xl transition-all duration-150 ease-out"
-                    style={{
-                      background: isHoveringTrash ? "rgba(220,38,38,0.95)" : "rgba(0,0,0,0.55)",
-                      border: "1px solid rgba(255,255,255,0.16)",
-                      color: isHoveringTrash ? "#fff" : "rgba(255,200,200,0.95)",
-                      transform: isHoveringTrash ? "scale(1.08)" : "scale(1)",
-                    }}
-                  >
-                    <Trash2 className="w-6 h-6" />
-                  </div>
-                </div>
-              )}
-
-              {/* Add-pin hint */}
-                          </div>
-{isAddPinMode && !isFocusMode && (
-  <div
-    className="px-4 pt-3"
-    style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}
-  >
-    <div
-      className="text-[10px] font-semibold uppercase tracking-widest text-center"
-      style={{
-        color: "rgba(0,0,0,0.55)",
-        background: "rgba(255,255,255,0.70)",
-        border: "1px solid rgba(0,0,0,0.10)",
-        borderRadius: 999,
-        padding: "10px 12px",
-      }}
-    >
-      Tap anywhere on the photo to drop a pin
-    </div>
-  </div>
-)}
-
-            {/* Action row (main Add Pin lives here — no duplicate in notes when embedded) */}
-            <div
-              className="px-4 py-3 flex items-center justify-between"
-              style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}
-            >
-              <button
-                className="w-10 h-10 rounded-full grid place-items-center"
-                style={{ background: "rgba(0,0,0,0.04)", border: "1px solid rgba(0,0,0,0.08)" }}
-                onClick={() => alert("Wire actions later.")}
-                aria-label="More"
-                title="More"
-              >
-                <MoreHorizontal className="w-5 h-5 text-black/70" />
-              </button>
-
-              <div className="text-[11px] text-black/45">
-                {mediaIndex + 1} / {mediaCount}
-              </div>
-
-              <button
-                onClick={toggleAddPin}
-                className="h-10 px-4 rounded-full inline-flex items-center gap-2 transition-transform duration-200 ease-out active:scale-[0.98]"
-                style={{
-                  background: isAddPinMode ? palette.sun : "rgba(0,0,0,0.04)",
-                  border: "1px solid rgba(0,0,0,0.10)",
-                  color: palette.ink,
-                }}
-                aria-label="Add pin"
-                title="Add pin"
-                disabled={isFocusMode}
-              >
-                <MapPin className="w-4 h-4" />
-                <span className="text-xs font-semibold">{isAddPinMode ? "Cancel" : "Add Pin"}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* NOTES PANEL */}
         {!isFocusMode && (
-          <div className={isEmbedded ? "mt-3" : "w-full px-4 pb-4 sm:px-6"}>
-            <div
-              className={isEmbedded ? "w-full" : "mx-auto max-w-6xl"}
-              style={{
-                borderRadius: 8,
-                background: "rgba(255,255,255,0.88)",
-                border: "1px solid rgba(0,0,0,0.10)",
-                boxShadow: "0 22px 60px -52px rgba(0,0,0,0.55)",
-                overflow: "hidden",
-              }}
-            >
-              <div
-                className="px-4 py-3 flex items-center justify-between"
-                style={{ borderBottom: "1px solid rgba(0,0,0,0.08)" }}
-              >
-                <div className="flex items-center gap-2">
-                  <StickyNote className="w-4 h-4 text-black/60" />
-                  <div className="text-sm font-semibold" style={{ fontFamily: headerFont }}>
-                    Notes
-                  </div>
-                </div>
-
-                {/* Embedded: show only Focus here (Add Pin button removed to prevent “collapsed interim” UI) */}
-                <div className="flex items-center gap-2">
-                  {isEmbedded ? (
-                    <button
-                      onClick={() => {
-                        const next = !isFocusMode;
-                        setIsFocusMode(next);
-                        setIsAddPinMode(false);
-                        if (next) setSelectedPinId(null);
-                      }}
-                      className="h-9 px-3 rounded-[8px] inline-flex items-center gap-2"
-                      style={{
-                        background: "rgba(255,255,255,0.78)",
-                        border: "1px solid rgba(0,0,0,0.10)",
-                        color: "rgba(0,0,0,0.78)",
-                      }}
-                      aria-label="Focus"
-                      title="Focus"
-                    >
-                      {isFocusMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                      <span className="text-xs font-semibold">{isFocusMode ? "Exit" : "Focus"}</span>
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="p-4 sm:p-5 space-y-4">
-                {/* Photo notes placeholder */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-[11px] font-semibold uppercase tracking-widest text-black/45">
-                      Photo notes
-                    </div>
-                    <button
-                      onClick={() => alert("Wire per-photo notes later.")}
-                      className="w-9 h-9 rounded-[8px] inline-flex items-center justify-center"
-                      style={{
-                        background: "rgba(255,255,255,0.70)",
-                        border: "1px solid rgba(0,0,0,0.10)",
-                      }}
-                      title="Add note"
-                      aria-label="Add note"
-                    >
-                      <Edit3 className="w-4 h-4 text-black/60" />
-                    </button>
-                  </div>
-
-                  <div
-                    className="text-sm text-black/70 leading-relaxed"
-                    style={{
-                      background: "rgba(255,255,255,0.58)",
-                      border: "1px solid rgba(0,0,0,0.08)",
-                      borderRadius: 8,
-                      padding: 12,
-                    }}
-                  >
-                    No photo notes yet.
-                  </div>
-                </div>
-
-                {/* Pins */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-[11px] font-semibold uppercase tracking-widest text-black/45">
-                      Pins
-                    </div>
-                    <div className="text-[11px] text-black/45">
-                      {currentHotspots.length ? `${currentHotspots.length} total` : "None"}
-                    </div>
-                  </div>
-
-                  {currentHotspots.length === 0 ? (
-                    <div
-                      className="text-sm text-black/60"
-                      style={{
-                        background: "rgba(255,255,255,0.58)",
-                        border: "1px dashed rgba(0,0,0,0.18)",
-                        borderRadius: 8,
-                        padding: 12,
-                      }}
-                    >
-                      No pins yet. Tap <b>Add Pin</b>, then tap the photo.
-                    </div>
-                  ) : (
-                    <>
-                      {/* Selected pin preview */}
-                      <div
-                        className="mb-3"
-                        style={{
-                          background: "rgba(255,255,255,0.58)",
-                          border: "1px solid rgba(0,0,0,0.08)",
-                          borderRadius: 8,
-                          padding: 12,
-                        }}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <div
-                                className="w-7 h-7 rounded-full grid place-items-center text-xs font-bold"
-                                style={{
-                                  background: palette.sun,
-                                  color: palette.ink,
-                                  border: "1px solid rgba(0,0,0,0.12)",
-                                }}
-                              >
-                                {Math.max(
-                                  1,
-                                  currentHotspots.findIndex((h) => h.id === selectedPin?.id) + 1
-                                )}
-                              </div>
-                              <div
-                                className="text-sm font-semibold truncate"
-                                style={{ fontFamily: headerFont }}
-                              >
-                                {selectedPin?.label?.trim() ? selectedPin.label : "Untitled pin"}
-                              </div>
-                            </div>
-
-                            <div className="mt-2 text-sm text-black/70 leading-relaxed">
-                              {selectedPin?.note?.trim()
-                                ? selectedPin.note
-                                : "No note yet. Hit Edit to add one."}
-                            </div>
-                          </div>
-
-                          <button
-                            onClick={() => openPinEditor(selectedPin)}
-                            className="h-9 px-3 rounded-[8px] inline-flex items-center gap-2"
-                            style={{
-                              background: "rgba(255,255,255,0.70)",
-                              border: "1px solid rgba(0,0,0,0.10)",
-                              color: palette.ink,
-                            }}
-                          >
-                            <Pencil className="w-4 h-4" />
-                            <span className="text-xs font-semibold">Edit</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Quick pin list */}
-                      <div className="flex gap-2 overflow-x-auto pb-1">
-                        {currentHotspots.map((h, i) => {
-                          const active = h.id === selectedPin?.id;
-                          return (
-                            <button
-                              key={h.id}
-                              onClick={() => setSelectedPinId(h.id)}
-                              className="shrink-0 h-9 px-3 rounded-[999px] text-xs font-semibold transition-colors duration-200 ease-out"
-                              style={{
-                                background: active ? palette.sky : "rgba(255,255,255,0.65)",
-                                color: active ? "#fff" : "rgba(0,0,0,0.70)",
-                                border: "1px solid rgba(0,0,0,0.10)",
-                              }}
-                            >
-                              #{i + 1}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+          <PinNotesPanel
+            headerFont={headerFont}
+            palette={palette}
+            hotspots={currentHotspots}
+            selectedPin={drag.selectedPin}
+            setSelectedPinId={setSelectedPinId}
+            isAddPinMode={isAddPinMode}
+            toggleAddPinMode={() => setIsAddPinMode((v) => !v)}
+            openPinEditor={openPinEditor}
+            media={media}
+            moreFromSession={moreFromSession}
+            onSelectMedia={(m) => onSelectMedia?.(m)}
+          />
         )}
       </div>
 
-      {/* Pin editor modal */}
       {pinOpen && (
         <PinEditorModal
           open={pinOpen}

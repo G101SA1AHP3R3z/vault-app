@@ -1,17 +1,103 @@
-import React from "react";
-import { Camera, Sparkles } from "lucide-react";
+// /src/features/library/LibraryGrid.jsx
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Camera, MoreHorizontal, Share2, Pencil, Trash2 } from "lucide-react";
 import { useVault } from "../../context/VaultContext";
 
-export default function LibraryGrid({ onQuickAdd }) {
-  const { filteredProjects, setActiveProject, setView } = useVault();
+function formatProjectDate(createdAt) {
+  try {
+    if (!createdAt) return "";
+    // Firestore Timestamp
+    if (typeof createdAt?.toDate === "function") {
+      const d = createdAt.toDate();
+      return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "2-digit" });
+    }
+    if (typeof createdAt?.seconds === "number") {
+      const d = new Date(createdAt.seconds * 1000);
+      return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "2-digit" });
+    }
+    const d = new Date(createdAt);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "2-digit" });
+    }
+  } catch {}
+  return "";
+}
+
+function KebabMenu({ items = [], palette }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    const onDown = (e) => {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown);
+    return () => window.removeEventListener("pointerdown", onDown);
+  }, []);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className="w-9 h-9 rounded-[8px] inline-flex items-center justify-center"
+        style={{
+          background: "rgba(255,255,255,0.92)",
+          border: `1px solid ${palette?.line || "rgba(0,0,0,0.10)"}`,
+          color: "rgba(0,0,0,0.70)",
+        }}
+        aria-label="More"
+        title="More"
+      >
+        <MoreHorizontal className="w-4 h-4" />
+      </button>
+
+      {open && (
+        <div
+          className="absolute right-0 mt-2 w-52 overflow-hidden z-50"
+          style={{
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.95)",
+            border: `1px solid ${palette?.line || "rgba(0,0,0,0.10)"}`,
+            boxShadow: "0 18px 45px -38px rgba(0,0,0,0.45)",
+          }}
+        >
+          {items.map((it, idx) => (
+            <button
+              key={idx}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setOpen(false);
+                it?.onClick?.();
+              }}
+              className="w-full px-4 py-3 flex items-center gap-3 text-sm font-semibold text-left hover:bg-black/5"
+              style={{ color: it?.danger ? "#DC2626" : "rgba(0,0,0,0.78)" }}
+            >
+              {it?.icon ? <it.icon className="w-4 h-4" /> : null}
+              {it?.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function LibraryGrid({ onQuickAdd, onNew }) {
+  const { filteredProjects, setActiveProject, setView, renameProject, deleteProject, createInvite } =
+    useVault();
 
   const palette = {
     ink: "#0B0B0C",
     paper: "#FFFEFA",
-    line: "rgba(0,0,0,0.08)",
-    sky: "#3AA8FF",
-    sun: "#FFEA3A",
-    breeze: "#54E6C1",
+    line: "rgba(0,0,0,0.10)",
+    muted: "rgba(0,0,0,0.55)",
+    accent: "rgba(255,77,46,0.95)",
   };
 
   const openProject = (p) => {
@@ -19,122 +105,150 @@ export default function LibraryGrid({ onQuickAdd }) {
     setView("project");
   };
 
-  const getProjectThumbs = (project) => {
-    const sessions = Array.isArray(project?.sessions) ? project.sessions : [];
-    const media = sessions.flatMap((s) => (Array.isArray(s?.media) ? s.media : []));
-    const urls = media
-      .map((m) => m?.url)
-      .filter((u) => typeof u === "string" && u.trim());
+  const projects = useMemo(() => filteredProjects || [], [filteredProjects]);
 
-    const a = urls[0] || project?.coverPhoto || "";
-    const b = urls[1] || urls[0] || project?.coverPhoto || "";
-    const c = urls[2] || urls[1] || urls[0] || project?.coverPhoto || "";
-    return [a, b, c];
+  const shareProject = async (project) => {
+    // Best: invite link. If not available/allowed, fall back to copying the projectId.
+    try {
+      const inviteId = await createInvite?.(project.id, "editor");
+      if (inviteId) {
+        await navigator.clipboard.writeText(inviteId);
+        alert("Copied invite code to clipboard.");
+        return;
+      }
+    } catch {}
+
+    try {
+      await navigator.clipboard.writeText(project.id);
+      alert("Copied projectId to clipboard.");
+    } catch {
+      prompt("Copy projectId:", project.id);
+    }
   };
 
-  const getProjectCount = (project) => {
-    const sessions = Array.isArray(project?.sessions) ? project.sessions : [];
-    return sessions.reduce((acc, s) => acc + (Array.isArray(s?.media) ? s.media.length : 0), 0);
+  const editProject = async (project) => {
+    const next = prompt("Rename project", project?.title || "");
+    if (next == null) return;
+    const title = next.trim();
+    if (!title) return;
+    try {
+      await renameProject?.(project.id, title);
+    } catch (e) {
+      alert(e?.message || "Rename failed.");
+    }
+  };
+
+  const removeProject = async (project) => {
+    if (!confirm("Delete this project?")) return;
+    try {
+      await deleteProject?.(project.id);
+    } catch (e) {
+      alert(e?.message || "Delete failed.");
+    }
   };
 
   return (
-    <div className="w-full pb-28 animate-in fade-in duration-500">
-      <div className="grid grid-cols-2 gap-4">
-        {filteredProjects.map((project) => {
-          const [a, b, c] = getProjectThumbs(project);
-          const count = getProjectCount(project);
+    <div className="w-full pb-32 animate-in fade-in duration-300">
+      {/* Header (match screenshot) */}
+      <div className="px-6 pt-6 pb-5 flex items-center justify-between">
+        <div className="text-[18px] font-semibold tracking-[0.02em]" style={{ color: palette.ink }}>
+          [ Projects ]
+        </div>
 
-          return (
-            <div
-              key={project.id}
-              onClick={() => openProject(project)}
-              className="cursor-pointer active:scale-[0.99] transition-transform"
-            >
-              <div
-                className="overflow-hidden relative"
-                style={{
-                  borderRadius: 8,
-                  background: "rgba(255,255,255,0.70)",
-                  border: `1px solid ${palette.line}`,
-                  backdropFilter: "blur(14px)",
-                  boxShadow: "0 18px 45px -38px rgba(0,0,0,0.30)",
-                }}
-              >
-                <div className="grid grid-cols-3 gap-[2px]" style={{ background: "rgba(0,0,0,0.06)" }}>
-                  <div className="col-span-2 row-span-2 aspect-[4/3]">
-                    {a ? (
-                      <img src={a} alt="" className="w-full h-full object-cover" loading="lazy" />
-                    ) : (
-                      <div className="w-full h-full grid place-items-center text-black/35">
-                        <Sparkles className="w-5 h-5" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="aspect-[4/3]">
-                    {b ? <img src={b} alt="" className="w-full h-full object-cover" loading="lazy" /> : <div className="w-full h-full bg-black/5" />}
-                  </div>
-                  <div className="aspect-[4/3]">
-                    {c ? <img src={c} alt="" className="w-full h-full object-cover" loading="lazy" /> : <div className="w-full h-full bg-black/5" />}
-                  </div>
-                </div>
+        <button
+          onClick={() => onNew?.()}
+          className="text-[12px] font-semibold tracking-[0.14em]"
+          style={{ color: palette.accent }}
+        >
+          + NEW
+        </button>
+      </div>
 
-                <div
-                  className="pointer-events-none"
-                  style={{
-                    height: 0,
-                    boxShadow:
-                      "inset 0 0 0 1px rgba(255,234,58,0.14), inset 0 0 0 2px rgba(58,168,255,0.08)",
-                  }}
-                />
+      {/* Grid */}
+      <div className="px-6">
+        <div className="grid grid-cols-2 gap-5">
+          {projects.map((project) => {
+            const dateText = formatProjectDate(project.createdAt);
 
-                {onQuickAdd && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onQuickAdd(project);
-                    }}
-                    className="absolute top-2 right-2 w-9 h-9 grid place-items-center"
-                    style={{
-                      borderRadius: 12,
-                      background: "rgba(255,255,255,0.72)",
-                      border: `1px solid ${palette.line}`,
-                      backdropFilter: "blur(14px)",
-                      boxShadow: "0 18px 45px -40px rgba(0,0,0,0.35)",
-                      color: "rgba(0,0,0,0.70)",
-                    }}
-                    aria-label="Quick add media"
-                    title="Quick add"
+            return (
+              <div key={project.id} className="w-full">
+                <button
+                  onClick={() => openProject(project)}
+                  className="w-full text-left active:scale-[0.995] transition-transform"
+                  style={{ WebkitTapHighlightColor: "transparent" }}
+                  aria-label={`Open ${project.title}`}
+                >
+                  {/* Image */}
+                  <div
+                    className="relative w-full aspect-square overflow-hidden"
+                    style={{ background: "rgba(0,0,0,0.08)", borderRadius: 0 }}
                   >
-                    <Camera className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
+                    {project.coverPhoto ? (
+                      <img
+                        src={project.coverPhoto}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                        decoding="async"
+                        draggable={false}
+                      />
+                    ) : null}
 
-              <div className="mt-2 px-0.5">
-                <div className="text-[13px] font-semibold leading-tight" style={{ color: "rgba(0,0,0,0.82)" }}>
-                  {project.title}
-                </div>
-                <div className="mt-0.5 text-[11px] text-black/45">
-                  {count ? `${count} items` : "No items yet"}
-                  {project?.expiresIn ? ` • ${project.expiresIn}` : ""}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+                    {/* Top-right kebab */}
+                    <div className="absolute top-2 right-2">
+                      <KebabMenu
+                        palette={palette}
+                        items={[
+                          { label: "Edit", icon: Pencil, onClick: () => editProject(project) },
+                          { label: "Share", icon: Share2, onClick: () => shareProject(project) },
+                          { label: "Delete", icon: Trash2, danger: true, onClick: () => removeProject(project) },
+                        ]}
+                      />
+                    </div>
 
-        {filteredProjects.length === 0 && (
-          <div
-            className="col-span-2 py-12 text-center"
-            style={{
-              borderRadius: 14,
-              background: "rgba(255,255,255,0.55)",
-              border: `1px solid ${palette.line}`,
-              backdropFilter: "blur(14px)",
-              color: "rgba(0,0,0,0.45)",
-            }}
-          >
-            <div className="text-xs font-semibold uppercase tracking-widest">No projects found.</div>
+                    {/* Camera badge (bottom-right) */}
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onQuickAdd?.(project);
+                      }}
+                      className="absolute bottom-2 right-2 w-9 h-9 grid place-items-center"
+                      style={{
+                        borderRadius: 10,
+                        background: "rgba(255,255,255,0.92)",
+                        border: `1px solid ${palette.line}`,
+                      }}
+                      aria-label="Quick add media"
+                      title="Add photos"
+                    >
+                      <Camera className="w-4 h-4" style={{ color: "rgba(0,0,0,0.75)" }} />
+                    </button>
+                  </div>
+
+                  {/* Title + date */}
+                  <div className="pt-3">
+                    <div
+                      className="text-[12px] font-semibold tracking-[0.02em] line-clamp-1"
+                      style={{ color: palette.ink }}
+                    >
+                      {project.title || "Untitled"}
+                    </div>
+                    {dateText ? (
+                      <div className="mt-1 text-[11px]" style={{ color: "rgba(0,0,0,0.45)" }}>
+                        {dateText}
+                      </div>
+                    ) : null}
+                  </div>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {projects.length === 0 && (
+          <div className="pt-10 text-[12px]" style={{ color: palette.muted }}>
+            No projects yet.
           </div>
         )}
       </div>

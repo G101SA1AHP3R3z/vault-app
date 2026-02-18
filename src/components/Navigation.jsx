@@ -1,68 +1,98 @@
 import React from "react";
-import { Library, Search, Archive, Layers } from "lucide-react";
+import { Archive, Settings, Search } from "lucide-react";
+
+function LibraryMark({ active }) {
+  // 3 vertical bars icon (like your screenshot)
+  const color = active ? "rgba(255,77,46,0.95)" : "rgba(0,0,0,0.45)";
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+      <rect x="4" y="4" width="2.6" height="12" rx="1.3" fill={color} />
+      <rect x="8.7" y="4" width="2.6" height="12" rx="1.3" fill={color} opacity="0.75" />
+      <rect x="13.4" y="4" width="2.6" height="12" rx="1.3" fill={color} opacity="0.55" />
+    </svg>
+  );
+}
+
+function IconBtn({ active, onClick, children, label }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-11 h-11 grid place-items-center rounded-[12px] active:scale-[0.98] transition-transform"
+      style={{ background: active ? "rgba(0,0,0,0.04)" : "transparent" }}
+      aria-label={label}
+      title={label}
+    >
+      {children}
+    </button>
+  );
+}
 
 export default function Navigation({ currentTab, setTab }) {
-  const tabs = [
-    { id: "library", label: "Library", icon: Library },
-    { id: "search", label: "Search", icon: Search },
-    { id: "vault", label: "Vault", icon: Archive },
-    { id: "sessions", label: "Sessions", icon: Layers },
-  ];
-
   const palette = {
+    line: "rgba(0,0,0,0.10)",
     ink: "#0B0B0C",
-    line: "rgba(0,0,0,0.08)",
-    sun: "#FFEA3A",
   };
+
+  const isActive = (id) => currentTab === id;
 
   return (
     <>
-      {/* --- MOBILE: APP-STORE-STYLE TAB BAR (Bottom Full Width) --- */}
-      <div className="md:hidden fixed bottom-0 inset-x-0 z-50">
-        <div
-          className="px-2 pt-2 pb-[calc(env(safe-area-inset-bottom,0px)+10px)]"
-          style={{
-            background: "rgba(255,255,255,0.78)",
-            borderTop: `1px solid ${palette.line}`,
-            backdropFilter: "blur(18px)",
-            boxShadow: "0 -18px 40px -34px rgba(0,0,0,0.35)",
-          }}
-        >
-          <div className="max-w-xl mx-auto flex items-end justify-around">
-            {tabs.map((tab) => {
-              const isActive = currentTab === tab.id;
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setTab(tab.id)}
-                  className="flex flex-col items-center justify-center gap-1 w-[92px] py-2 rounded-[12px] active:scale-[0.99] transition-transform"
-                  style={{
-                    background: isActive ? "rgba(0,0,0,0.04)" : "transparent",
-                    color: isActive ? palette.ink : "rgba(0,0,0,0.55)",
-                  }}
-                  aria-label={tab.label}
-                >
-                  <div
-                    className="w-8 h-8 rounded-[10px] grid place-items-center"
-                    style={{
-                      background: isActive ? "rgba(255,234,58,0.55)" : "rgba(0,0,0,0.04)",
-                      border: `1px solid ${palette.line}`,
-                    }}
-                  >
-                    <Icon className="w-4 h-4" />
-                  </div>
-                  <div className="text-[10px] font-semibold" style={{ letterSpacing: "0.03em" }}>
-                    {tab.label}
-                  </div>
-                </button>
-              );
-            })}
+      {/* MOBILE FLOATING NAV (matches screenshot) */}
+      <div className="md:hidden fixed bottom-8 inset-x-0 z-50 pointer-events-none">
+        <div className="max-w-md mx-auto px-6 flex items-end justify-between">
+          {/* Left pill */}
+          <div
+            className="pointer-events-auto flex items-center gap-1 px-2 py-2"
+            style={{
+              borderRadius: 14,
+              background: "rgba(255,255,255,0.92)",
+              border: `1px solid ${palette.line}`,
+              boxShadow: "0 18px 45px -40px rgba(0,0,0,0.35)",
+              backdropFilter: "blur(18px)",
+            }}
+          >
+            {/* Library */}
+            <IconBtn active={isActive("library")} onClick={() => setTab("library")} label="Library">
+              <LibraryMark active={isActive("library")} />
+            </IconBtn>
+
+            {/* Archive (maps to your existing 'graveyard' tab) */}
+            <IconBtn active={isActive("graveyard")} onClick={() => setTab("graveyard")} label="Archive">
+              <Archive
+                className="w-5 h-5"
+                style={{ color: isActive("graveyard") ? palette.ink : "rgba(0,0,0,0.45)" }}
+              />
+            </IconBtn>
+
+            {/* Settings (keeping tab id as 'vault' so your app doesn't break) */}
+            <IconBtn active={isActive("vault")} onClick={() => setTab("vault")} label="Settings">
+              <Settings
+                className="w-5 h-5"
+                style={{ color: isActive("vault") ? palette.ink : "rgba(0,0,0,0.45)" }}
+              />
+            </IconBtn>
           </div>
+
+          {/* Right floating search button */}
+          <button
+            onClick={() => setTab("search")}
+            className="pointer-events-auto w-12 h-12 grid place-items-center rounded-[14px] active:scale-[0.98] transition-transform"
+            style={{
+              background: "rgba(255,255,255,0.92)",
+              border: `1px solid ${palette.line}`,
+              boxShadow: "0 18px 45px -40px rgba(0,0,0,0.35)",
+              backdropFilter: "blur(18px)",
+            }}
+            aria-label="Search"
+            title="Search"
+          >
+            <Search
+              className="w-5 h-5"
+              style={{ color: isActive("search") ? palette.ink : "rgba(0,0,0,0.45)" }}
+            />
+          </button>
         </div>
       </div>
-
-      {/* Desktop can stay as-is in your app (if you had one). */}
     </>
   );
 }
