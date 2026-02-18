@@ -39,12 +39,10 @@ export default function MediaViewer({
 }) {
   const isEmbedded = mode === "embedded";
 
-  // Modes
   const [isAddPinMode, setIsAddPinMode] = useState(false);
-  const [isFocusMode, setIsFocusMode] = useState(false); // kept for compatibility
+  const [isFocusMode, setIsFocusMode] = useState(false);
   const [selectedPinId, setSelectedPinId] = useState(null);
 
-  // Pin editor modal
   const [pinOpen, setPinOpen] = useState(false);
   const [pinDraft, setPinDraft] = useState({ label: "", note: "" });
   const [pinTarget, setPinTarget] = useState(null);
@@ -54,7 +52,45 @@ export default function MediaViewer({
 
   const currentHotspots = Array.isArray(media?.hotspots) ? media.hotspots : [];
 
-  // Reset on media change
+  const neighbors = useMemo(() => {
+    if (!media?.id || !Array.isArray(moreFromSession) || moreFromSession.length === 0) {
+      return { prevSrc: "", nextSrc: "", canPrev: false, canNext: false };
+    }
+    const idx = moreFromSession.findIndex((m) => m?.id === media.id);
+    if (idx < 0) return { prevSrc: "", nextSrc: "", canPrev: false, canNext: false };
+
+    const prev = idx > 0 ? moreFromSession[idx - 1] : null;
+    const next = idx < moreFromSession.length - 1 ? moreFromSession[idx + 1] : null;
+
+    return {
+      prevSrc: prev?.url || "",
+      nextSrc: next?.url || "",
+      canPrev: Boolean(prev?.url),
+      canNext: Boolean(next?.url),
+    };
+  }, [media?.id, moreFromSession]);
+
+  // Preload neighbors
+  useEffect(() => {
+    if (!media?.id) return;
+    if (!Array.isArray(moreFromSession) || moreFromSession.length < 2) return;
+
+    const idx = moreFromSession.findIndex((m) => m?.id === media.id);
+    if (idx < 0) return;
+
+    const candidates = [moreFromSession[idx - 1], moreFromSession[idx + 1]]
+      .filter(Boolean)
+      .map((m) => m?.url)
+      .filter(Boolean);
+
+    candidates.forEach((src) => {
+      const img = new Image();
+      img.decoding = "async";
+      img.src = src;
+    });
+  }, [media?.id, moreFromSession]);
+
+  // Reset UI on media change
   useEffect(() => {
     setIsAddPinMode(false);
     setIsFocusMode(false);
@@ -63,9 +99,12 @@ export default function MediaViewer({
 
   const swipe = useSwipeNav({
     enabled: true,
-    isBlocked: isAddPinMode, // match your old behavior
-    onPrev,
-    onNext,
+    isBlocked: isAddPinMode,
+    stageRef,
+    canPrev: neighbors.canPrev,
+    canNext: neighbors.canNext,
+    onPrev: () => onPrev?.(),
+    onNext: () => onNext?.(),
     onSwipeDown,
   });
 
@@ -174,6 +213,10 @@ export default function MediaViewer({
           stageRef={stageRef}
           trashRef={trashRef}
           media={media}
+          prevSrc={neighbors.prevSrc}
+          nextSrc={neighbors.nextSrc}
+          dragX={swipe.displayX}
+          isDragging={swipe.isDragging}
           palette={palette}
           isAddPinMode={isAddPinMode}
           isFocusMode={isFocusMode}
@@ -191,13 +234,30 @@ export default function MediaViewer({
             setSelectedPinId(null);
             onBack?.();
           }}
-          // swipe + drag
-          onStagePointerDown={swipe.onPointerDown}
-          onStagePointerEnd={swipe.onPointerEnd}
-          onStagePointerMove={drag.onStagePointerMove}
-          onStagePointerUp={drag.onStagePointerUp}
+          // Gesture wiring: pin-drag wins. Swipe gets a single end call.
+          onStagePointerDown={(e) => {
+            // Start swipe unless a pin drag is beginning
+            swipe.onPointerDown(e);
+          }}
+          onStagePointerMove={(e) => {
+            drag.onStagePointerMove?.(e);
+            if (!drag.draggingPinId) swipe.onPointerMove(e);
+          }}
+          onStagePointerUp={(e) => {
+            drag.onStagePointerUp?.(e);
+            if (!drag.draggingPinId) swipe.onPointerEnd(e);
+          }}
+          onStagePointerCancel={(e) => {
+            drag.onStagePointerUp?.(e);
+            if (!drag.draggingPinId) swipe.onPointerEnd(e);
+          }}
           onTouchStart={swipe.onTouchStart}
-          onTouchEnd={swipe.onTouchEnd}
+          onTouchMove={(e) => {
+            if (!drag.draggingPinId) swipe.onTouchMove(e);
+          }}
+          onTouchEnd={(e) => {
+            if (!drag.draggingPinId) swipe.onTouchEnd(e);
+          }}
         />
 
         {!isFocusMode && (

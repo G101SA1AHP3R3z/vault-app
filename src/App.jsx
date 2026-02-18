@@ -12,6 +12,7 @@ import Login from "./components/Login";
 import LibraryGrid from "./features/library/LibraryGrid";
 import MediaViewer from "./features/media/MediaViewer";
 import ProjectView from "./features/project/ProjectView";
+import Settings from "./features/settings/settings";
 import useProjectMediaNavigator from "./features/media/hooks/useProjectMediaNavigator";
 
 function AuthGate({ children }) {
@@ -19,10 +20,7 @@ function AuthGate({ children }) {
 
   if (!authReady) {
     return (
-      <div
-        className="min-h-screen flex items-center justify-center"
-        style={{ background: "#FFFEFA" }}
-      >
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#FFFEFA" }}>
         <Loader2 className="w-8 h-8 animate-spin text-black" />
       </div>
     );
@@ -96,7 +94,7 @@ function VaultShell() {
     // projects
     addProject,
     renameProject,
-    archiveProject, // soft delete -> graveyard
+    archiveProject,
     createInvite,
 
     // sessions
@@ -114,7 +112,6 @@ function VaultShell() {
     deleteHotspotFromMedia,
   } = useVault();
 
-  // Viewer + nav extracted
   const mediaNav = useProjectMediaNavigator(activeProject, deleteMediaFromProject);
 
   const [newOpen, setNewOpen] = useState(false);
@@ -132,7 +129,6 @@ function VaultShell() {
     }
   }, [view, tab]);
 
-  // ✅ Dashboard title based on current tab
   const dashboardTitle = useMemo(() => {
     if (tab === "graveyard") return "[ Archive ]";
     if (tab === "vault") return "[ Settings ]";
@@ -199,7 +195,6 @@ function VaultShell() {
     setActiveProject(null);
   };
 
-  // ---- project kebab actions ----
   const shareProject = async () => {
     if (!activeProject?.id) return;
     try {
@@ -232,7 +227,6 @@ function VaultShell() {
     }
   };
 
-  // soft delete -> graveyard
   const removeProject = async () => {
     if (!activeProject?.id) return;
     if (!confirm("Move this project to the Graveyard?")) return;
@@ -248,7 +242,6 @@ function VaultShell() {
     }
   };
 
-  // ---- session actions ----
   const shareSession = async (session) => {
     if (!activeProject?.id || !session?.id) return;
     const token = `${activeProject.id}::${session.id}`;
@@ -284,25 +277,17 @@ function VaultShell() {
   };
 
   const handleDeleteInViewer = async () => {
-    if (!activeProject?.id || !mediaNav.selectedMedia?.id || !mediaNav.selectedMedia?.sessionId)
-      return;
+    if (!activeProject?.id || !mediaNav.selectedMedia?.id || !mediaNav.selectedMedia?.sessionId) return;
     if (!confirm("Permanently delete this photo?")) return;
     await mediaNav.deleteSelectedMedia();
   };
 
   return (
     <AbstractCreamBackdrop>
-      <div
-        className="min-h-screen text-gray-900 flex justify-center items-center antialiased"
-        style={{ fontFamily: bodyFont }}
-      >
+      <div className="min-h-screen text-gray-900 flex justify-center items-center antialiased" style={{ fontFamily: bodyFont }}>
         {view === "dashboard" && <Navigation currentTab={tab} setTab={setTab} />}
 
-        <div
-          className={`w-full transition-all duration-300 ease-out flex justify-center ${
-            view === "dashboard" ? "md:pl-64" : ""
-          }`}
-        >
+        <div className={`w-full transition-all duration-300 ease-out flex justify-center ${view === "dashboard" ? "md:pl-64" : ""}`}>
           <div
             className="w-full max-w-md min-h-screen relative border-x"
             style={{
@@ -339,22 +324,27 @@ function VaultShell() {
                   </div>
                 ) : null}
 
-                <LibraryGrid
-                  title={dashboardTitle}
-                  onQuickAdd={(project) => {
-                    setActiveProject(project);
-                    setView("project");
-                    setPrefillSessionId(null);
-                    setPrefillSessionTitle("New Session");
-                    setAutoPromptMediaPicker(false);
-                    setMediaOpen(true);
-                  }}
-                  onNew={() => setNewOpen(true)}
-                />
+                {/* ✅ Settings tab renders Settings page */}
+                {tab === "vault" ? (
+                  <Settings headerFont={headerFont} palette={palette} />
+                ) : (
+                  <LibraryGrid
+                    title={dashboardTitle}
+                    onQuickAdd={(project) => {
+                      setActiveProject(project);
+                      setView("project");
+                      setPrefillSessionId(null);
+                      setPrefillSessionTitle("New Session");
+                      setAutoPromptMediaPicker(false);
+                      setMediaOpen(true);
+                    }}
+                    onNew={() => setNewOpen(true)}
+                  />
+                )}
               </div>
             )}
 
-            {/* PROJECT PAGE (extracted) */}
+            {/* PROJECT PAGE */}
             {view === "project" && activeProject && (
               <ProjectView
                 project={activeProject}
@@ -398,11 +388,7 @@ function VaultShell() {
             )}
 
             {/* Modals */}
-            <NewProjectModal
-              open={newOpen}
-              onClose={() => setNewOpen(false)}
-              onCreate={handleCreateProject}
-            />
+            <NewProjectModal open={newOpen} onClose={() => setNewOpen(false)} onCreate={handleCreateProject} />
 
             <AddMediaModal
               isOpen={mediaOpen}

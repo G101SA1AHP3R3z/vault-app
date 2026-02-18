@@ -1,14 +1,21 @@
 // /src/components/AddMediaModal.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { X, Camera, Upload, ChevronDown, Loader2, Plus } from "lucide-react";
+import { X, Camera, Plus, ChevronDown, Loader2, Upload } from "lucide-react";
 
 export default function AddMediaModal({
   open,
   isOpen,
   onClose,
-  onAddMedia, // expects: ({ files: File[], sessionId, sessionTitle }) => Promise
+  onAddMedia, // ({ files: File[], sessionId, sessionTitle }) => Promise
   existingSessions = [],
-  autoPrompt = false,
+
+  // behavior
+  autoPrompt = false, // opens file picker on open
+  autoSubmit = true, // auto-upload once files selected
+
+  // prefill from App.jsx
+  defaultSessionId = null,
+  defaultSessionTitle = "",
 }) {
   const OPEN = typeof isOpen === "boolean" ? isOpen : Boolean(open);
 
@@ -16,9 +23,8 @@ export default function AddMediaModal({
     ink: "#0B0B0C",
     paper: "#FFFEFA",
     line: "rgba(0,0,0,0.08)",
+    accent: "rgba(255,77,46,0.95)",
     sky: "#3AA8FF",
-    sun: "#FFEA3A",
-    breeze: "#54E6C1",
   };
 
   const [mounted, setMounted] = useState(false);
@@ -34,7 +40,7 @@ export default function AddMediaModal({
   const [isUploading, setIsUploading] = useState(false);
   const [uploaded, setUploaded] = useState(false);
 
-  const [showSessionPicker, setShowSessionPicker] = useState(true);
+  const [showSessionPicker, setShowSessionPicker] = useState(false);
 
   const cameraInputRef = useRef(null);
   const uploadInputRef = useRef(null);
@@ -50,19 +56,33 @@ export default function AddMediaModal({
         if (url) all.push({ id: m.id, url });
       });
     });
-    return all.reverse().slice(0, 18);
+    return all.reverse().slice(0, 12);
   }, [existingSessions]);
 
+  // Reset on open
   useEffect(() => {
     if (OPEN) {
       setMounted(true);
       setUploaded(false);
       setIsUploading(false);
 
-      const hasSessions = existingSessions.length > 0;
-      setSessionMode(hasSessions ? "existing" : "new");
-      setSessionId(existingSessions[0]?.id || "");
-      setNewSessionTitle("");
+      const hasSessions = (existingSessions || []).length > 0;
+
+      // Prefer explicit defaults
+      if (defaultSessionId && hasSessions) {
+        setSessionMode("existing");
+        setSessionId(defaultSessionId);
+        setNewSessionTitle("");
+      } else if ((defaultSessionTitle || "").trim()) {
+        setSessionMode("new");
+        setSessionId(existingSessions?.[0]?.id || "");
+        setNewSessionTitle(defaultSessionTitle.trim());
+      } else {
+        // fallback
+        setSessionMode(hasSessions ? "existing" : "new");
+        setSessionId(existingSessions?.[0]?.id || "");
+        setNewSessionTitle("");
+      }
 
       setFiles([]);
       setPreviews([]);
@@ -80,6 +100,7 @@ export default function AddMediaModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [OPEN]);
 
+  // cleanup URLs
   useEffect(() => {
     return () => {
       previews.forEach((u) => {
@@ -90,6 +111,8 @@ export default function AddMediaModal({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const canClose = !isUploading;
 
   const close = () => {
     setVisible(false);
@@ -137,9 +160,10 @@ export default function AddMediaModal({
     });
   };
 
-  // ✅ Auto-upload when files goes from empty -> non-empty
+  // Auto upload
   useEffect(() => {
     if (!OPEN) return;
+    if (!autoSubmit) return;
     if (isUploading) return;
     if (uploaded) return;
     if (files.length === 0) return;
@@ -148,7 +172,8 @@ export default function AddMediaModal({
       setIsUploading(true);
       try {
         const sid = sessionMode === "existing" ? sessionId : null;
-        const title = sessionMode === "new" ? (newSessionTitle || "New Session") : "";
+        const title =
+          sessionMode === "new" ? (newSessionTitle || "New Session").trim() : "";
 
         await onAddMedia?.({
           files,
@@ -165,17 +190,21 @@ export default function AddMediaModal({
       }
     };
 
-    const t = setTimeout(run, 180); // tiny grace period for “oops” removals
+    const t = setTimeout(run, 180); // small grace period for “oops” removals
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files.length]);
+  }, [files.length, autoSubmit]);
 
   if (!mounted) return null;
 
-  const canClose = !isUploading;
+  const currentSessionLabel =
+    sessionMode === "existing"
+      ? existingSessions.find((s) => s.id === sessionId)?.title || "Session"
+      : newSessionTitle || "New session";
 
   return (
     <div className="fixed inset-0 z-[100]">
+      {/* Backdrop */}
       <div
         className="absolute inset-0"
         onClick={() => {
@@ -183,55 +212,73 @@ export default function AddMediaModal({
         }}
         style={{
           background: "rgba(11,11,12,0.45)",
-          backdropFilter: "blur(6px)",
+          backdropFilter: "blur(8px)",
           opacity: visible ? 1 : 0,
           transition: "opacity 200ms ease-out",
         }}
       />
 
+      {/* Sheet */}
       <div
         className="absolute left-0 right-0 bottom-0 w-full"
         style={{
-          transform: visible ? "translateY(0px)" : "translateY(18px)",
+          transform: visible ? "translateY(0px)" : "translateY(16px)",
           opacity: visible ? 1 : 0,
           transition: "transform 220ms ease-out, opacity 220ms ease-out",
         }}
       >
         <div
-          className="mx-auto w-full max-w-lg overflow-hidden"
+          className="mx-auto w-full max-w-md overflow-hidden"
           style={{
-            borderTopLeftRadius: 26,
-            borderTopRightRadius: 26,
-            background: "rgba(255,255,255,0.86)",
+            borderTopLeftRadius: 18,
+            borderTopRightRadius: 18,
+            background: "rgba(255,254,250,0.96)",
             border: `1px solid ${palette.line}`,
-            backdropFilter: "blur(18px)",
             boxShadow: "0 -24px 70px -52px rgba(0,0,0,0.55)",
           }}
         >
+          {/* Grabber */}
           <div className="pt-3 pb-2 flex justify-center">
             <div
               style={{
-                width: 46,
-                height: 5,
+                width: 44,
+                height: 4,
                 borderRadius: 999,
                 background: "rgba(0,0,0,0.14)",
               }}
             />
           </div>
 
-          <div className="px-4 pb-3 flex items-center justify-between">
-            <div className="text-[16px] font-semibold" style={{ color: palette.ink }}>
-              Add Media
+          {/* Header */}
+          <div className="px-6 pb-4 flex items-center justify-between">
+            <div>
+              <div
+                className="text-[18px] font-semibold tracking-[0.02em]"
+                style={{ color: "rgba(0,0,0,0.85)" }}
+              >
+                [ Add Media ]
+              </div>
+              <div className="mt-1 text-[12px]" style={{ color: "rgba(0,0,0,0.40)" }}>
+                Select up to 5. Auto-saves.
+              </div>
             </div>
 
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => uploadInputRef.current?.click()}
-                className="text-[14px] font-semibold"
-                style={{ color: palette.sky }}
+                className="h-9 px-3 inline-flex items-center gap-2 text-[12px] font-semibold"
+                style={{
+                  borderRadius: 10,
+                  background: "rgba(255,255,255,0.70)",
+                  border: `1px solid ${palette.line}`,
+                  color: "rgba(0,0,0,0.72)",
+                  opacity: isUploading ? 0.6 : 1,
+                }}
+                disabled={isUploading}
               >
-                All Photos
+                <Plus className="w-4 h-4" />
+                Add
               </button>
 
               <button
@@ -240,7 +287,7 @@ export default function AddMediaModal({
                 }}
                 className="w-9 h-9 grid place-items-center"
                 style={{
-                  borderRadius: 12,
+                  borderRadius: 10,
                   background: "rgba(255,255,255,0.70)",
                   border: `1px solid ${palette.line}`,
                   color: "rgba(0,0,0,0.65)",
@@ -254,29 +301,28 @@ export default function AddMediaModal({
             </div>
           </div>
 
-          <div className="px-4 pb-3">
-            <div className="text-[11px] font-semibold uppercase tracking-widest text-black/45 mb-2">
-              Recent uploads
+          {/* Recent + camera */}
+          <div className="px-6 pb-4">
+            <div className="text-[11px] font-semibold tracking-[0.18em] text-black/45">
+              QUICK PICK
             </div>
 
-            <div className="flex gap-3 overflow-x-auto pb-2">
+            <div className="mt-3 flex gap-3 overflow-x-auto pb-2">
               <button
                 type="button"
                 onClick={() => cameraInputRef.current?.click()}
-                className="shrink-0"
+                className="shrink-0 grid place-items-center"
                 style={{
-                  width: 86,
-                  height: 86,
-                  borderRadius: 16,
+                  width: 80,
+                  height: 80,
+                  borderRadius: 12,
                   background: "rgba(0,0,0,0.04)",
                   border: `1px solid ${palette.line}`,
-                  display: "grid",
-                  placeItems: "center",
                 }}
                 aria-label="Camera"
                 title="Camera"
               >
-                <Camera className="w-6 h-6" style={{ color: "rgba(0,0,0,0.55)" }} />
+                <Camera className="w-5 h-5" style={{ color: "rgba(0,0,0,0.55)" }} />
               </button>
 
               {recentThumbs.length === 0 ? (
@@ -284,7 +330,7 @@ export default function AddMediaModal({
                   className="shrink-0 flex items-center"
                   style={{ color: "rgba(0,0,0,0.35)", fontSize: 12 }}
                 >
-                  No uploads yet.
+                  No recent uploads yet.
                 </div>
               ) : (
                 recentThumbs.map((t) => (
@@ -292,9 +338,9 @@ export default function AddMediaModal({
                     key={t.id}
                     className="shrink-0 overflow-hidden"
                     style={{
-                      width: 86,
-                      height: 86,
-                      borderRadius: 16,
+                      width: 80,
+                      height: 80,
+                      borderRadius: 12,
                       border: `1px solid ${palette.line}`,
                       background: "rgba(255,255,255,0.55)",
                     }}
@@ -311,24 +357,24 @@ export default function AddMediaModal({
             </div>
           </div>
 
-          <div className="px-4 pb-3">
+          {/* Session picker */}
+          <div className="px-6 pb-4">
             <button
               type="button"
               onClick={() => setShowSessionPicker((v) => !v)}
               className="w-full flex items-center justify-between px-3 py-3"
               style={{
-                borderRadius: 16,
+                borderRadius: 12,
                 background: "rgba(255,255,255,0.70)",
                 border: `1px solid ${palette.line}`,
-                color: "rgba(0,0,0,0.70)",
+                color: "rgba(0,0,0,0.75)",
               }}
+              disabled={isUploading}
             >
               <div className="text-[12px] font-semibold">
                 Add to{" "}
                 <span style={{ color: "rgba(0,0,0,0.45)", fontWeight: 600 }}>
-                  {sessionMode === "existing"
-                    ? existingSessions.find((s) => s.id === sessionId)?.title || "Existing"
-                    : newSessionTitle || "New session"}
+                  {currentSessionLabel}
                 </span>
               </div>
               <ChevronDown
@@ -345,7 +391,7 @@ export default function AddMediaModal({
               <div
                 className="mt-2 p-2"
                 style={{
-                  borderRadius: 16,
+                  borderRadius: 12,
                   background: "rgba(255,255,255,0.62)",
                   border: `1px solid ${palette.line}`,
                 }}
@@ -355,20 +401,20 @@ export default function AddMediaModal({
                     <button
                       type="button"
                       onClick={() => setSessionMode("existing")}
-                      className="flex-1 py-2 text-[11px] font-semibold uppercase tracking-widest"
+                      className="flex-1 py-2 text-[11px] font-semibold tracking-[0.18em]"
                       disabled={isUploading}
                       style={{
-                        borderRadius: 14,
+                        borderRadius: 10,
                         border: `1px solid ${palette.line}`,
                         background:
                           sessionMode === "existing"
-                            ? "rgba(255,255,255,0.80)"
-                            : "rgba(255,255,255,0.35)",
+                            ? "rgba(255,255,255,0.82)"
+                            : "rgba(255,255,255,0.40)",
                         color:
                           sessionMode === "existing"
-                            ? "rgba(0,0,0,0.75)"
+                            ? "rgba(0,0,0,0.80)"
                             : "rgba(0,0,0,0.45)",
-                        opacity: isUploading ? 0.6 : 1,
+                        textTransform: "uppercase",
                       }}
                     >
                       Existing
@@ -378,20 +424,20 @@ export default function AddMediaModal({
                   <button
                     type="button"
                     onClick={() => setSessionMode("new")}
-                    className="flex-1 py-2 text-[11px] font-semibold uppercase tracking-widest"
+                    className="flex-1 py-2 text-[11px] font-semibold tracking-[0.18em]"
                     disabled={isUploading}
                     style={{
-                      borderRadius: 14,
+                      borderRadius: 10,
                       border: `1px solid ${palette.line}`,
                       background:
                         sessionMode === "new"
-                          ? "rgba(255,255,255,0.80)"
-                          : "rgba(255,255,255,0.35)",
+                          ? "rgba(255,255,255,0.82)"
+                          : "rgba(255,255,255,0.40)",
                       color:
                         sessionMode === "new"
-                          ? "rgba(0,0,0,0.75)"
+                          ? "rgba(0,0,0,0.80)"
                           : "rgba(0,0,0,0.45)",
-                      opacity: isUploading ? 0.6 : 1,
+                      textTransform: "uppercase",
                     }}
                   >
                     New
@@ -401,12 +447,12 @@ export default function AddMediaModal({
                 {sessionMode === "existing" ? (
                   <select
                     className="w-full px-3 py-3 text-sm font-semibold outline-none"
-                    disabled={isUploading}
+                    disabled={isUploading || existingSessions.length === 0}
                     style={{
-                      borderRadius: 14,
+                      borderRadius: 10,
                       background: "rgba(255,255,255,0.70)",
                       border: `1px solid ${palette.line}`,
-                      color: "rgba(0,0,0,0.75)",
+                      color: "rgba(0,0,0,0.78)",
                       opacity: isUploading ? 0.6 : 1,
                     }}
                     value={sessionId}
@@ -414,7 +460,7 @@ export default function AddMediaModal({
                   >
                     {existingSessions.map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.title} ({s.date})
+                        {s.title}
                       </option>
                     ))}
                   </select>
@@ -425,10 +471,10 @@ export default function AddMediaModal({
                     className="w-full px-3 py-3 text-sm font-semibold outline-none"
                     disabled={isUploading}
                     style={{
-                      borderRadius: 14,
+                      borderRadius: 10,
                       background: "rgba(255,255,255,0.70)",
                       border: `1px solid ${palette.line}`,
-                      color: "rgba(0,0,0,0.75)",
+                      color: "rgba(0,0,0,0.78)",
                       opacity: isUploading ? 0.6 : 1,
                     }}
                     value={newSessionTitle}
@@ -439,10 +485,11 @@ export default function AddMediaModal({
             )}
           </div>
 
-          <div className="px-4 pb-4">
+          {/* Selected strip */}
+          <div className="px-6 pb-5">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-[11px] font-semibold uppercase tracking-widest text-black/45">
-                Selected (up to 5)
+              <div className="text-[11px] font-semibold tracking-[0.18em] text-black/45">
+                SELECTED ({files.length}/5)
               </div>
 
               <button
@@ -451,14 +498,14 @@ export default function AddMediaModal({
                 disabled={isUploading || files.length >= 5}
                 className="h-8 px-3 inline-flex items-center gap-2 text-[11px] font-semibold"
                 style={{
-                  borderRadius: 12,
+                  borderRadius: 10,
                   background: "rgba(255,255,255,0.70)",
                   border: `1px solid ${palette.line}`,
-                  color: "rgba(0,0,0,0.70)",
+                  color: "rgba(0,0,0,0.72)",
                   opacity: isUploading || files.length >= 5 ? 0.5 : 1,
                 }}
               >
-                <Plus className="w-4 h-4" /> Add
+                <Plus className="w-4 h-4" /> Add more
               </button>
             </div>
 
@@ -466,7 +513,7 @@ export default function AddMediaModal({
               <div
                 className="px-3 py-3"
                 style={{
-                  borderRadius: 16,
+                  borderRadius: 12,
                   background: "rgba(255,255,255,0.62)",
                   border: `1px solid ${palette.line}`,
                   color: "rgba(0,0,0,0.40)",
@@ -482,9 +529,9 @@ export default function AddMediaModal({
                     key={u}
                     className="shrink-0 relative overflow-hidden"
                     style={{
-                      width: 92,
-                      height: 92,
-                      borderRadius: 18,
+                      width: 88,
+                      height: 88,
+                      borderRadius: 12,
                       border: `1px solid ${palette.line}`,
                       background: "rgba(255,255,255,0.55)",
                     }}
@@ -503,10 +550,10 @@ export default function AddMediaModal({
                         className="absolute top-2 right-2 w-7 h-7 grid place-items-center"
                         style={{
                           borderRadius: 999,
-                          background: "rgba(255,255,255,0.78)",
+                          background: "rgba(255,255,255,0.82)",
                           border: `1px solid ${palette.line}`,
                           color: "rgba(0,0,0,0.70)",
-                          backdropFilter: "blur(12px)",
+                          backdropFilter: "blur(10px)",
                         }}
                         aria-label="Remove"
                         title="Remove"
@@ -520,26 +567,33 @@ export default function AddMediaModal({
             )}
           </div>
 
+          {/* Footer status */}
           <div
-            className="px-4 pt-3 pb-5 flex items-center justify-between"
+            className="px-6 py-4 flex items-center justify-between"
             style={{
               borderTop: `1px solid ${palette.line}`,
               background: "rgba(255,255,255,0.55)",
             }}
           >
             <div className="text-xs font-semibold" style={{ color: "rgba(0,0,0,0.55)" }}>
-              {isUploading ? "Uploading…" : uploaded ? "Uploaded. Tap outside to close." : ""}
+              {isUploading
+                ? "Uploading…"
+                : uploaded
+                ? "Uploaded. Tap outside to close."
+                : files.length
+                ? "Ready to upload."
+                : ""}
             </div>
 
             <div
               className="h-10 px-4 inline-flex items-center gap-2"
               style={{
-                borderRadius: 14,
+                borderRadius: 12,
                 background: isUploading
                   ? "rgba(0,0,0,0.06)"
                   : uploaded
-                  ? "rgba(84,230,193,0.18)"
-                  : "rgba(255,234,58,0.30)",
+                  ? "rgba(84,230,193,0.16)"
+                  : "rgba(255,234,58,0.18)",
                 border: `1px solid ${palette.line}`,
                 color: "rgba(0,0,0,0.70)",
               }}
@@ -549,12 +603,13 @@ export default function AddMediaModal({
               ) : (
                 <Upload className="w-4 h-4" />
               )}
-              <span className="text-[11px] font-semibold uppercase tracking-widest">
+              <span className="text-[11px] font-semibold tracking-[0.18em]" style={{ textTransform: "uppercase" }}>
                 {isUploading ? "Saving" : uploaded ? "Saved" : "Ready"}
               </span>
             </div>
           </div>
 
+          {/* Inputs */}
           <input
             ref={cameraInputRef}
             type="file"
