@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react";
 
 /**
  * iOS-like swipe with interactive drag + edge resistance + spring settle.
- * Bypasses React state for 60fps native-feeling dragging via a DOM ref.
+ * Uses direct DOM transforms for 60fps dragging.
+ *
+ * Key:
+ * - Ignores gestures starting on [data-noswipe]
+ * - Clears timers on reset/unmount
+ * - Does NOT snap transform to 0 until mediaKey changes (prevents flash)
+ * - Supports iOS-like "gap" between slides via gapPx
  */
 export default function useSwipeNav({
   enabled = true,
@@ -12,9 +18,11 @@ export default function useSwipeNav({
   onSwipeDown,
   isBlocked = false,
   stageRef = null,
-  animationMs = 240,
+  animationMs = 260,
   canPrev = true,
   canNext = true,
+  mediaKey,
+  gapPx = 16, // 👈 NEW
 }) {
   const swipeRef = useRef({
     down: false,
@@ -27,31 +35,69 @@ export default function useSwipeNav({
   });
 
   const [isDragging, setIsDragging] = useState(false);
+  const pendingResetRef = useRef(false);
+
+  const timersRef = useRef([]);
+  const addTimer = (id) => {
+    timersRef.current.push(id);
+    return id;
+  };
+  const clearTimers = () => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+  };
+
+  useEffect(() => () => clearTimers(), []);
 
   const getStageWidth = () => {
     const w = stageRef?.current?.clientWidth;
     return typeof w === "number" && w > 0 ? w : window.innerWidth;
   };
 
+  const step = () => getStageWidth() + (gapPx || 0); // 👈 NEW
+
   const setTransform = (x, transition = "none") => {
-    if (!carouselRef?.current) return;
-    carouselRef.current.style.transition = transition;
-    carouselRef.current.style.transform = `translate3d(${x}px, 0, 0)`;
+    const el = carouselRef?.current;
+    if (!el) return;
+    el.style.transition = transition;
+    el.style.transform = `translate3d(${x}px, 0, 0)`;
   };
 
-  const reset = () => {
+  const shouldIgnoreGesture = (e) => {
+    const t = e?.target;
+    if (!t || typeof t.closest !== "function") return false;
+    return Boolean(t.closest("[data-noswipe]"));
+  };
+
+  const resetGestureState = () => {
     swipeRef.current.down = false;
     swipeRef.current.axis = null;
     swipeRef.current.pointerId = null;
     swipeRef.current.lastDx = 0;
     setIsDragging(false);
+  };
+
+  const hardReset = () => {
+    clearTimers();
+    pendingResetRef.current = false;
+    resetGestureState();
     setTransform(0, "none");
   };
 
   useEffect(() => {
-    if (isBlocked) reset();
+    if (isBlocked) hardReset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isBlocked]);
+
+  // Snap back ONLY after media changes (so middle slide is updated)
+  useEffect(() => {
+    if (!pendingResetRef.current) return;
+    pendingResetRef.current = false;
+    clearTimers();
+    resetGestureState();
+    setTransform(0, "none");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaKey]);
 
   const rubberBand = (dx, dimension) => {
     const d = Math.abs(dx);
@@ -62,6 +108,7 @@ export default function useSwipeNav({
 
   const onPointerDown = (e) => {
     if (!enabled || isBlocked) return;
+    if (shouldIgnoreGesture(e)) return;
 
     const x = e.clientX ?? e.touches?.[0]?.clientX;
     const y = e.clientY ?? e.touches?.[0]?.clientY;
@@ -79,7 +126,7 @@ export default function useSwipeNav({
     setTransform(0, "none");
 
     try {
-      e.currentTarget?.setPointerCapture?.(e.pointerId);
+      if (e.pointerId != null) e.currentTarget?.setPointerCapture?.(e.pointerId);
     } catch {}
   };
 
@@ -106,7 +153,7 @@ export default function useSwipeNav({
       return;
     }
 
-    const w = getStageWidth();
+    const w = getStageWidth(); // rubberband should use actual visible width
     const goingPrev = dx > 0;
     const goingNext = dx < 0;
 
@@ -114,41 +161,47 @@ export default function useSwipeNav({
       dx = rubberBand(dx, w);
     }
 
-    const max = Math.max(80, w * 0.95);
+    const max = Math.max(90, w * 0.95);
     const clamped = Math.max(-max, Math.min(max, dx));
 
     swipeRef.current.lastDx = clamped;
-    
-    // Direct DOM injection to bypass React render frame drops
     setTransform(clamped, "none");
   };
 
   const springBack = (fromDx) => {
     setIsDragging(false);
-    const overshoot = Math.max(-32, Math.min(32, -fromDx * 0.08));
 
-    setTransform(overshoot, `transform ${animationMs * 0.6}ms cubic-bezier(0.22, 1, 0.36, 1)`);
+    const overshoot = Math.max(-28, Math.min(28, -fromDx * 0.08));
+    setTransform(
+      overshoot,
+      `transform ${Math.round(animationMs * 0.6)}ms cubic-bezier(0.22, 1, 0.36, 1)`
+    );
 
-    setTimeout(() => {
-      setTransform(0, `transform ${animationMs * 0.4}ms ease-out`);
+    addTimer(
       setTimeout(() => {
-        reset();
-      }, animationMs * 0.4 + 20);
-    }, animationMs * 0.6 + 20);
+        setTransform(0, `transform ${Math.round(animationMs * 0.4)}ms ease-out`);
+        addTimer(setTimeout(() => hardReset(), Math.round(animationMs * 0.4) + 30));
+      }, Math.round(animationMs * 0.6) + 30)
+    );
   };
 
-  const commitSlide = (dir, w) => {
+  const commitSlide = (dir) => {
+    // dir: +1 => next (slide left), -1 => prev (slide right)
     setIsDragging(false);
-    const targetX = dir === 1 ? -w : w;
+
+    const dist = step(); // 👈 includes gap
+    const targetX = dir === 1 ? -dist : dist;
 
     setTransform(targetX, `transform ${animationMs}ms cubic-bezier(0.22, 1, 0.36, 1)`);
 
-    // Buffer ensures CSS transition absolutely finishes before snapping back data
-    setTimeout(() => {
-      if (dir === 1) onNext?.();
-      else onPrev?.();
-      reset();
-    }, animationMs + 20);
+    addTimer(
+      setTimeout(() => {
+        pendingResetRef.current = true;
+        if (dir === 1) onNext?.();
+        else onPrev?.();
+        resetGestureState();
+      }, animationMs + 20)
+    );
   };
 
   const onPointerEnd = (e) => {
@@ -172,13 +225,13 @@ export default function useSwipeNav({
     const dy = y == null ? 0 : y - swipeRef.current.y0;
 
     if (dy > 90 && Math.abs(dy) > Math.abs(dx) * 1.25) {
-      reset();
+      hardReset();
       onSwipeDown?.();
       return;
     }
 
     if (swipeRef.current.axis === "y") {
-      reset();
+      hardReset();
       return;
     }
 
@@ -194,18 +247,15 @@ export default function useSwipeNav({
       return;
     }
 
-    const commitByDistance = Math.abs(dx) > Math.max(75, w * 0.22);
+    const commitByDistance = Math.abs(dx) > Math.max(70, w * 0.22);
     const commitByVelocity = Math.abs(v) > 0.65 && Math.abs(dx) > 40;
-    const shouldCommit =
-      (commitByDistance || commitByVelocity) && Math.abs(dx) > Math.abs(dy) * 1.15;
 
-    if (!shouldCommit) {
+    if (!(commitByDistance || commitByVelocity)) {
       springBack(dx);
       return;
     }
 
-    const dir = dx < 0 ? 1 : -1;
-    commitSlide(dir, w);
+    commitSlide(dx < 0 ? 1 : -1);
   };
 
   return {

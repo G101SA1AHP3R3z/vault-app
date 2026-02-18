@@ -38,6 +38,9 @@ export default function MediaViewer({
 }) {
   const isEmbedded = mode === "embedded";
 
+  // iOS Photos-like spacing between slides
+  const GAP_PX = 16;
+
   const [isAddPinMode, setIsAddPinMode] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [selectedPinId, setSelectedPinId] = useState(null);
@@ -70,25 +73,22 @@ export default function MediaViewer({
     };
   }, [media?.id, moreFromSession]);
 
+  // Preload + decode neighbors to reduce hitching on swipe-in
   useEffect(() => {
-    if (!media?.id) return;
-    if (!Array.isArray(moreFromSession) || moreFromSession.length < 2) return;
+    const list = [neighbors.prevSrc, neighbors.nextSrc].filter(Boolean);
+    if (!list.length) return;
 
-    const idx = moreFromSession.findIndex((m) => m?.id === media.id);
-    if (idx < 0) return;
-
-    const candidates = [moreFromSession[idx - 1], moreFromSession[idx + 1]]
-      .filter(Boolean)
-      .map((m) => m?.url)
-      .filter(Boolean);
-
-    candidates.forEach((src) => {
+    list.forEach((src) => {
       const img = new Image();
       img.decoding = "async";
       img.src = src;
+      if (typeof img.decode === "function") {
+        img.decode().catch(() => {});
+      }
     });
-  }, [media?.id, moreFromSession]);
+  }, [neighbors.prevSrc, neighbors.nextSrc]);
 
+  // Reset UI when switching media
   useEffect(() => {
     setIsAddPinMode(false);
     setIsFocusMode(false);
@@ -105,6 +105,8 @@ export default function MediaViewer({
     onPrev: () => onPrev?.(),
     onNext: () => onNext?.(),
     onSwipeDown,
+    mediaKey: media?.id, // IMPORTANT: reset transform AFTER media swaps
+    gapPx: GAP_PX,
   });
 
   const drag = usePinDrag({
@@ -226,15 +228,14 @@ export default function MediaViewer({
           onPinPointerDown={drag.onPinPointerDown}
           onClickToAddPin={handleStageClickToAddPin}
           onDeleteMedia={onDeleteMedia}
+          gapPx={GAP_PX}
           onBack={() => {
             setIsAddPinMode(false);
             setIsFocusMode(false);
             setSelectedPinId(null);
             onBack?.();
           }}
-          onStagePointerDown={(e) => {
-            swipe.onPointerDown(e);
-          }}
+          onStagePointerDown={(e) => swipe.onPointerDown(e)}
           onStagePointerMove={(e) => {
             drag.onStagePointerMove?.(e);
             if (!drag.draggingPinId) swipe.onPointerMove(e);
@@ -273,12 +274,8 @@ export default function MediaViewer({
           headerFont={headerFont}
           palette={palette}
           onClose={() => setPinOpen(false)}
-          onSave={async (draft) => {
-            await savePinEdits(draft);
-          }}
-          onDelete={async () => {
-            await deletePin();
-          }}
+          onSave={savePinEdits}
+          onDelete={deletePin}
         />
       )}
     </Outer>

@@ -10,7 +10,7 @@ function clamp01(n) {
 export default function MediaStage({
   isEmbedded,
   headerHeightMax = "72vh",
-  
+
   stageRef,
   carouselRef,
   trashRef,
@@ -39,6 +39,8 @@ export default function MediaStage({
   isHoveringTrash,
   getDisplayXY,
   onPinPointerDown,
+
+  gapPx = 16,
 }) {
   const currentSrc = media?.url || "";
 
@@ -49,6 +51,11 @@ export default function MediaStage({
 
   const showPrev = Boolean(prevSrc);
   const showNext = Boolean(nextSrc);
+
+  const stopAll = (e) => {
+    e.preventDefault?.();
+    e.stopPropagation();
+  };
 
   return (
     <div className={isEmbedded ? "w-full" : "w-full"}>
@@ -67,7 +74,14 @@ export default function MediaStage({
         {/* Back */}
         {!isEmbedded && (
           <button
-            onClick={onBack}
+            type="button"
+            data-noswipe
+            onPointerDown={stopAll}
+            onPointerUp={stopAll}
+            onClick={(e) => {
+              stopAll(e);
+              onBack?.();
+            }}
             className="absolute top-4 left-4 z-50 w-10 h-10 rounded-full bg-white/90 border border-black/10 grid place-items-center shadow-sm"
             aria-label="Back"
           >
@@ -78,7 +92,14 @@ export default function MediaStage({
         {/* Delete media */}
         {!isEmbedded && typeof onDeleteMedia === "function" && (
           <button
-            onClick={onDeleteMedia}
+            type="button"
+            data-noswipe
+            onPointerDown={stopAll}
+            onPointerUp={stopAll}
+            onClick={(e) => {
+              stopAll(e);
+              onDeleteMedia?.();
+            }}
             className="absolute top-4 right-4 z-50 w-10 h-10 rounded-full bg-white/90 border border-black/10 grid place-items-center shadow-sm"
             aria-label="Delete"
             title="Delete"
@@ -87,14 +108,21 @@ export default function MediaStage({
           </button>
         )}
 
-        {/* NATIVE CAROUSEL WRAPPER */}
+        {/* CAROUSEL WRAPPER */}
         <div
           ref={carouselRef}
           className="absolute inset-0 w-full h-full"
-          style={{ willChange: "transform" }}
+          style={{
+            willChange: "transform",
+            // CSS custom property in JSX (works in .jsx)
+            "--gap": `${gapPx}px`,
+          }}
         >
-          {/* Prev Photo */}
-          <div className="absolute inset-0 w-full h-full" style={{ left: "-100%" }}>
+          {/* Prev (with gap) */}
+          <div
+            className="absolute inset-0 w-full h-full"
+            style={{ left: "calc(-100% - var(--gap))" }}
+          >
             {showPrev && (
               <img
                 src={prevSrc}
@@ -107,7 +135,7 @@ export default function MediaStage({
             )}
           </div>
 
-          {/* Current Photo & Pins */}
+          {/* Current (middle) */}
           <div className="absolute inset-0 w-full h-full" style={{ left: "0%" }}>
             {currentSrc && (
               <img
@@ -122,7 +150,7 @@ export default function MediaStage({
               />
             )}
 
-            {/* Pins bound directly to the middle slide so they swipe gracefully */}
+            {/* Pins */}
             {!isFocusMode &&
               hotspots.map((h, idx) => {
                 const { x, y } = getDisplayXY
@@ -137,7 +165,11 @@ export default function MediaStage({
                   <button
                     key={h.id}
                     type="button"
-                    onPointerDown={(e) => onPinPointerDown?.(e, h)}
+                    data-noswipe
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      onPinPointerDown?.(e, h);
+                    }}
                     className={`absolute -translate-x-1/2 -translate-y-1/2 select-none touch-none
                       transition-transform duration-150 ease-out
                       ${
@@ -147,13 +179,7 @@ export default function MediaStage({
                       }
                       ${draggingPinId === h.id ? "scale-[1.10] z-50" : "z-10 hover:scale-[1.03]"}
                     `}
-                    style={{
-                      left,
-                      top,
-                      WebkitTouchCallout: "none",
-                      WebkitUserSelect: "none",
-                      userSelect: "none",
-                    }}
+                    style={{ left, top }}
                     aria-label="Pin"
                   >
                     <div
@@ -174,8 +200,11 @@ export default function MediaStage({
               })}
           </div>
 
-          {/* Next Photo */}
-          <div className="absolute inset-0 w-full h-full" style={{ left: "100%" }}>
+          {/* Next (with gap) */}
+          <div
+            className="absolute inset-0 w-full h-full"
+            style={{ left: "calc(100% + var(--gap))" }}
+          >
             {showNext && (
               <img
                 src={nextSrc}
@@ -189,7 +218,7 @@ export default function MediaStage({
           </div>
         </div>
 
-        {/* Trash drop zone stays outside the slider so it doesn't move */}
+        {/* Trash (doesn't move with slides) */}
         {!isFocusMode && (
           <div
             ref={trashRef}
@@ -212,22 +241,6 @@ export default function MediaStage({
               }}
             >
               <Trash2 className="w-6 h-6" />
-            </div>
-          </div>
-        )}
-
-        {/* Add-pin hint */}
-        {isAddPinMode && !isFocusMode && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none z-50">
-            <div
-              className="text-[11px] font-medium px-3 py-2 rounded-full"
-              style={{
-                background: "rgba(255,255,255,0.92)",
-                border: "1px solid rgba(0,0,0,0.10)",
-                color: "rgba(0,0,0,0.70)",
-              }}
-            >
-              Tap the photo to place a pin
             </div>
           </div>
         )}
