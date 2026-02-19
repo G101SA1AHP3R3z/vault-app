@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useRef, useMemo } from "react";
 
 export default function SessionStrip({
   headerFont,
@@ -6,33 +6,28 @@ export default function SessionStrip({
   moreFromSession = [],
   onSelectMedia,
 }) {
-  // We shove the filter INSIDE the memo so it doesn't create a brand new 
-  // array reference every frame and destroy the cache.
-  const windowed = useMemo(() => {
-    const list = Array.isArray(moreFromSession)
-      ? moreFromSession.filter((m) => m?.url)
-      : [];
+  const scrollRef = useRef(null);
 
-    if (list.length === 0) return [];
+  const list = useMemo(() => {
+    return Array.isArray(moreFromSession) ? moreFromSession.filter((m) => m?.url) : [];
+  }, [moreFromSession]);
 
-    const activeIdx = list.findIndex((m) => m.id === media?.id);
-    if (activeIdx < 0) return list.slice(0, 12);
-
-    // show a small strip around the active item
-    const before = 6;
-    const after = 8;
-    let s = Math.max(0, activeIdx - before);
-    let e = Math.min(list.length, activeIdx + after);
-
-    // ensure at least ~12 items if possible
-    while (e - s < 12 && (s > 0 || e < list.length)) {
-      if (s > 0) s--;
-      if (e < list.length) e++;
+  // FIX: Smoothly glide the scrollbar to keep the active thumbnail visible, 
+  // instead of destroying and recreating DOM nodes to fake a window.
+  useEffect(() => {
+    if (!media?.id || !scrollRef.current) return;
+    
+    const activeEl = scrollRef.current.querySelector(`[data-media-id="${media.id}"]`);
+    if (activeEl) {
+      activeEl.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "center",
+      });
     }
-    return list.slice(s, e);
-  }, [moreFromSession, media?.id]);
+  }, [media?.id]);
 
-  if (windowed.length === 0) return null;
+  if (list.length === 0) return null;
 
   return (
     <>
@@ -43,30 +38,35 @@ export default function SessionStrip({
         More photos from session
       </div>
 
-      <div className="mt-3 flex gap-3 overflow-x-auto pb-2">
-        {windowed.map((m) => {
+      <div 
+        ref={scrollRef}
+        className="mt-3 flex gap-3 overflow-x-auto pb-4 scroll-smooth hide-scrollbar" 
+        style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}
+      >
+        {list.map((m) => {
           const active = m.id === media?.id;
           return (
             <button
               key={m.id}
+              data-media-id={m.id}
               onClick={() => onSelectMedia?.(m)}
-              className="shrink-0 hover:opacity-80 transition-opacity"
+              className="shrink-0 outline-none"
               aria-label="Open photo"
               title="Open photo"
             >
               <div
-                className="w-[86px] h-[86px] overflow-hidden"
+                className={`w-[86px] h-[86px] overflow-hidden transition-all duration-300 ease-out ${
+                  active ? "opacity-100 scale-100 shadow-md" : "opacity-60 scale-95 hover:opacity-100"
+                }`}
                 style={{
                   borderRadius: 0,
                   border: active
-                    ? "2px solid rgba(0,0,0,0.65)" // Darkened slightly so it pops
-                    : "1px solid rgba(0,0,0,0.08)",
+                    ? "2px solid rgba(0,0,0,0.8)"
+                    : "1px solid rgba(0,0,0,0.1)",
                   background: "rgba(0,0,0,0.04)",
                 }}
               >
                 <img
-                  // Bro, if these aren't thumbnails, your phone is going to melt.
-                  // Use a thumbnail URL if you have one, fallback to the main url.
                   src={m.thumbnailUrl || m.url}
                   alt=""
                   className="w-full h-full object-cover"

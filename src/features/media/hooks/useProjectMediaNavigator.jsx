@@ -7,20 +7,14 @@ import { useCallback, useMemo, useRef, useState } from "react";
  *
  * Key improvement in this version:
  * - Keeps stable object references for media items (prevents “refresh” feel on swipe)
- *   by caching flattened media objects by `${sessionId}:${mediaId}` and reusing them
- *   unless relevant fields changed.
- *
- * Inputs:
- * - activeProject: project object with sessions[{id,title,media[]}]
- * - deleteMediaFromProject: async (projectId, sessionId, mediaId) => void
+ * by caching flattened media objects by `${sessionId}:${mediaId}` and reusing them
+ * unless relevant fields changed.
  */
 export default function useProjectMediaNavigator(activeProject, deleteMediaFromProject) {
   const [viewerOpen, setViewerOpen] = useState(false);
-  const [viewerKey, setViewerKey] = useState(null); // { sessionId, mediaId } | null
+  const [viewerKey, setViewerKey] = useState(null); 
 
-  // Cache flattened media objects so React doesn’t see “brand new” objects every update.
-  // This is a big contributor to the “refresh” feeling during swipes.
-  const flatCacheRef = useRef(new Map()); // key -> cached media object
+  const flatCacheRef = useRef(new Map()); 
 
   const flatMedia = useMemo(() => {
     const sessions = Array.isArray(activeProject?.sessions) ? activeProject.sessions : [];
@@ -41,9 +35,8 @@ export default function useProjectMediaNavigator(activeProject, deleteMediaFromP
 
         const prev = flatCacheRef.current.get(key);
 
-        // Only include the fields the viewer/navigation actually needs.
-        // Add more fields here only if you truly use them in MediaViewer/Stage.
         const url = m.url || "";
+        const thumbnailUrl = m.thumbnailUrl || m.thumbnail_url || ""; // Added to cache for the strip
         const hotspots = Array.isArray(m.hotspots) ? m.hotspots : [];
         const kind = m.kind || m.mediaType || (m.type === "video" ? "video" : "image");
         const type = m.type || "";
@@ -52,16 +45,18 @@ export default function useProjectMediaNavigator(activeProject, deleteMediaFromP
         const needsNew =
           !prev ||
           prev.url !== url ||
+          prev.thumbnailUrl !== thumbnailUrl ||
           prev.kind !== kind ||
           prev.type !== type ||
           prev.createdAt !== createdAt ||
-          prev.hotspots !== hotspots; // keep reference stable unless hotspots array identity changes
+          prev.hotspots !== hotspots; 
 
         if (needsNew) {
           const nextObj = {
             id: m.id,
             sessionId,
             url,
+            thumbnailUrl,
             kind,
             type,
             createdAt,
@@ -75,7 +70,6 @@ export default function useProjectMediaNavigator(activeProject, deleteMediaFromP
       }
     }
 
-    // Prune cache entries that no longer exist
     for (const k of flatCacheRef.current.keys()) {
       if (!nextKeys.has(k)) flatCacheRef.current.delete(k);
     }
@@ -95,19 +89,12 @@ export default function useProjectMediaNavigator(activeProject, deleteMediaFromP
     return flatMedia[selectedIndex] || null;
   }, [flatMedia, selectedIndex]);
 
-  // The carousel should use the session’s media order, but keep objects lightweight/stable.
+  // FIX: Tap directly into the stable flatMedia cache instead of mapping new objects.
+  // This completely eliminates unnecessary React identity-based re-renders in the SessionStrip.
   const moreFromSession = useMemo(() => {
-    if (!activeProject?.sessions || !selectedMedia?.sessionId) return [];
-    const s = (activeProject.sessions || []).find((x) => x?.id === selectedMedia.sessionId);
-    const arr = Array.isArray(s?.media) ? s.media : [];
-    return arr
-      .filter((m) => m?.url)
-      .map((m) => ({
-        id: m.id,
-        url: m.url,
-        sessionId: s?.id,
-      }));
-  }, [activeProject?.sessions, selectedMedia?.sessionId]);
+    if (!selectedMedia?.sessionId || !flatMedia.length) return [];
+    return flatMedia.filter((m) => m.sessionId === selectedMedia.sessionId && m.url);
+  }, [flatMedia, selectedMedia?.sessionId]);
 
   const setSelectedByIndex = useCallback(
     (idx) => {
@@ -142,10 +129,8 @@ export default function useProjectMediaNavigator(activeProject, deleteMediaFromP
 
     await deleteMediaFromProject?.(activeProject.id, selectedMedia.sessionId, selectedMedia.id);
 
-    // Choose next based on the *previous* flat list (stable)
     const next = flatMedia[deletedIndex + 1] || flatMedia[deletedIndex - 1] || null;
 
-    // Let VaultContext update propagate, then set next key / close
     requestAnimationFrame(() => {
       if (!next) {
         setViewerKey(null);
@@ -162,18 +147,13 @@ export default function useProjectMediaNavigator(activeProject, deleteMediaFromP
   }, []);
 
   return {
-    // state
     viewerOpen,
     viewerKey,
     setViewerKey,
-
-    // computed
     flatMedia,
     selectedIndex,
     selectedMedia,
     moreFromSession,
-
-    // actions
     openViewer,
     closeViewer,
     nextMedia,
