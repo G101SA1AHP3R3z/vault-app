@@ -3,8 +3,7 @@ import { Trash2, Play, MapPin, Check } from "lucide-react";
 
 /**
  * MediaCard
- * - Used inside session grids and horizontal "more to explore" rails.
- * - Supports long-press to enter selection mode (Pinterest / iOS Photos vibe).
+ * - Cleaner: sharper corners, lighter typography, minimal chrome.
  */
 export default function MediaCard({
   item,
@@ -33,10 +32,8 @@ export default function MediaCard({
   const hotspotsCount = Array.isArray(item?.hotspots) ? item.hotspots.length : 0;
 
   const palette = {
-    ink: "#0B0B0C",
-    line: "rgba(0,0,0,0.08)",
+    line: "rgba(0,0,0,0.12)",
     sky: "#3AA8FF",
-    sun: "#FFEA3A",
   };
 
   useEffect(() => {
@@ -81,56 +78,46 @@ export default function MediaCard({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       onPointerLeave={onPointerUp}
-      className={`${aspect} overflow-hidden relative cursor-pointer group active:scale-[0.985] transition-transform`}
+      className={`${aspect} overflow-hidden relative cursor-pointer group active:scale-[0.988] transition-transform`}
       style={{
-        borderRadius: 8,
-        background: "rgba(255,255,255,0.70)",
+        borderRadius: 10,
+        background: "rgba(0,0,0,0.04)",
         border: `1px solid ${palette.line}`,
-        backdropFilter: "blur(14px)",
-        boxShadow: "0 18px 45px -38px rgba(0,0,0,0.30)",
+        WebkitTapHighlightColor: "transparent",
       }}
       role="button"
       tabIndex={0}
+      aria-label="Open media"
     >
       {src ? (
-        <>
-          <img
-            src={src}
-            className="w-full h-full object-cover md:group-hover:scale-[1.03] transition-transform duration-300
-"
-            alt=""
-	    decoding="async"
-            loading="lazy"
-            draggable={false}
-          />
-          <div
-            className="absolute inset-0 pointer-events-none"
-            style={{
-              background:
-                "linear-gradient(135deg, rgba(58,168,255,0.10) 0%, rgba(255,234,58,0.06) 55%, rgba(255,255,255,0.04) 100%)",
-              mixBlendMode: "screen",
-            }}
-          />
-        </>
+        <img
+          src={src}
+          className="w-full h-full object-cover"
+          alt=""
+          decoding="async"
+          loading="lazy"
+          draggable={false}
+        />
       ) : (
-        <div className="w-full h-full flex items-center justify-center text-black/40 text-[10px] font-semibold uppercase tracking-widest">
+        <div className="w-full h-full flex items-center justify-center text-black/40 text-[10px] font-medium uppercase tracking-widest">
           No media
         </div>
       )}
 
+      {/* Selection overlay */}
       {selectionMode && (
         <>
           <div
             className="absolute inset-0 pointer-events-none"
-            style={{ background: selected ? "rgba(58,168,255,0.10)" : "rgba(0,0,0,0.02)" }}
+            style={{ background: selected ? "rgba(58,168,255,0.12)" : "rgba(0,0,0,0.04)" }}
           />
           <div
-            className="absolute top-2 right-2 w-8 h-8 rounded-full grid place-items-center"
+            className="absolute top-2 right-2 w-8 h-8 grid place-items-center"
             style={{
-              background: selected ? palette.sky : "rgba(255,255,255,0.82)",
+              borderRadius: 10,
+              background: selected ? palette.sky : "rgba(255,255,255,0.92)",
               color: selected ? "#fff" : "rgba(0,0,0,0.55)",
               border: `1px solid ${palette.line}`,
-              backdropFilter: "blur(14px)",
             }}
           >
             <Check className="w-4 h-4" />
@@ -138,36 +125,35 @@ export default function MediaCard({
         </>
       )}
 
+      {/* Meaningful badges only */}
       {isVideo && !selectionMode && (
         <div
           className="absolute bottom-2 left-2 inline-flex items-center gap-1 px-2 py-1"
           style={{
             borderRadius: 10,
-            background: "rgba(255,255,255,0.68)",
+            background: "rgba(255,255,255,0.90)",
             border: `1px solid ${palette.line}`,
-            backdropFilter: "blur(14px)",
             color: "rgba(0,0,0,0.70)",
           }}
         >
           <Play className="w-3 h-3" />
-          <span className="text-[10px] font-semibold uppercase tracking-wide">Video</span>
+          <span className="text-[10px] font-medium uppercase tracking-wide">Video</span>
         </div>
       )}
 
-      {item?.type === "photo" && hotspotsCount > 0 && !selectionMode && (
+      {hotspotsCount > 0 && !selectionMode && (
         <div
           className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-1"
           style={{
             borderRadius: 10,
-            background: "rgba(255,255,255,0.68)",
+            background: "rgba(255,255,255,0.90)",
             border: `1px solid ${palette.line}`,
-            backdropFilter: "blur(14px)",
             color: "rgba(0,0,0,0.70)",
           }}
           title={`${hotspotsCount} pin(s)`}
         >
           <MapPin className="w-3 h-3" />
-          <span className="text-[10px] font-semibold">{hotspotsCount}</span>
+          <span className="text-[10px] font-medium">{hotspotsCount}</span>
         </div>
       )}
 
@@ -179,11 +165,10 @@ export default function MediaCard({
           }}
           className="absolute top-2 right-2 w-8 h-8 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
           style={{
-            borderRadius: 12,
-            background: "rgba(255,255,255,0.68)",
+            borderRadius: 10,
+            background: "rgba(255,255,255,0.92)",
             border: `1px solid ${palette.line}`,
-            backdropFilter: "blur(14px)",
-            color: "rgba(0,0,0,0.60)",
+            color: "rgba(0,0,0,0.62)",
           }}
           aria-label="Delete media"
           title="Delete"

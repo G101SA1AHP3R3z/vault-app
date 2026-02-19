@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   Play,
@@ -7,6 +7,10 @@ import {
   Pencil,
   Trash2,
   MoreHorizontal,
+  Mic,
+  Square,
+  X,
+  Save,
 } from "lucide-react";
 
 function formatProjectDate(createdAt) {
@@ -14,36 +18,22 @@ function formatProjectDate(createdAt) {
     if (!createdAt) return "";
     if (typeof createdAt?.toDate === "function") {
       const d = createdAt.toDate();
-      return d.toLocaleDateString(undefined, {
-        month: "2-digit",
-        day: "2-digit",
-        year: "2-digit",
-      });
+      return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "2-digit" });
     }
     if (typeof createdAt?.seconds === "number") {
       const d = new Date(createdAt.seconds * 1000);
-      return d.toLocaleDateString(undefined, {
-        month: "2-digit",
-        day: "2-digit",
-        year: "2-digit",
-      });
+      return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "2-digit" });
     }
     const d = new Date(createdAt);
     if (!Number.isNaN(d.getTime())) {
-      return d.toLocaleDateString(undefined, {
-        month: "2-digit",
-        day: "2-digit",
-        year: "2-digit",
-      });
+      return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "2-digit" });
     }
   } catch {}
   return "";
 }
 
 function parseOverview(project) {
-  const items = Array.isArray(project?.overviewItems)
-    ? project.overviewItems.filter(Boolean)
-    : [];
+  const items = Array.isArray(project?.overviewItems) ? project.overviewItems.filter(Boolean) : [];
   if (items.length) return items.slice(0, 8);
 
   const raw = (project?.overview || "").trim();
@@ -56,6 +46,7 @@ function parseOverview(project) {
     if (lines.length) return lines.slice(0, 8);
   }
 
+  // legacy fallback
   const fallback = (project?.overallAudio || "").trim();
   if (!fallback) return [];
   return fallback
@@ -64,6 +55,77 @@ function parseOverview(project) {
     .filter(Boolean)
     .slice(0, 4)
     .map((l) => l.replace(/^\d+\.\s*/, ""));
+}
+
+function pickAudioMimeType() {
+  if (typeof window === "undefined") return "audio/webm";
+  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+  for (const c of candidates) {
+    try {
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported?.(c)) return c;
+    } catch {}
+  }
+  return "audio/webm";
+}
+
+async function startAudioRecording({ onTick, onSpeechChunk }) {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const mimeType = pickAudioMimeType();
+  const recorder = new MediaRecorder(stream, { mimeType });
+
+  const chunks = [];
+  let t = 0;
+
+  const interval = setInterval(() => {
+    t += 1;
+    onTick?.(t);
+  }, 1000);
+
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) chunks.push(e.data);
+  };
+
+  let recognition = null;
+  try {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SR) {
+      recognition = new SR();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
+      recognition.onresult = (event) => {
+        let finalText = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const res = event.results[i];
+          if (res.isFinal) finalText += `${res[0].transcript} `;
+        }
+        if (finalText.trim()) onSpeechChunk?.(finalText.trim());
+      };
+      recognition.start();
+    }
+  } catch {
+    recognition = null;
+  }
+
+  const stop = () =>
+    new Promise((resolve) => {
+      recorder.onstop = () => {
+        clearInterval(interval);
+        stream.getTracks().forEach((tr) => tr.stop());
+        try {
+          recognition?.stop?.();
+        } catch {}
+
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        const ext = blob.type.includes("mp4") ? "m4a" : "webm";
+        const file = new File([blob], `overview_${Date.now()}.${ext}`, { type: blob.type });
+        resolve(file);
+      };
+      recorder.stop();
+    });
+
+  recorder.start();
+  return { stop };
 }
 
 function KebabMenu({ items = [], palette }) {
@@ -150,8 +212,89 @@ export default function ProjectView({
   onEditSession,
   onShareSession,
   onDeleteSession,
+
+  // NEW props for overview audio/transcript
+  onUploadOverviewAudio, // (projectId, file, transcriptRaw) => Promise
+  onUpdateOverviewTranscript, // (projectId, text) => Promise
+  onClearOverviewAudio, // (projectId) => Promise
 }) {
+  const audioRef = useRef(null);
+
+  const [recording, setRecording] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const recorderRef = useRef(null);
+
+  const [localTranscript, setLocalTranscript] = useState("");
+  const [dirtyTranscript, setDirtyTranscript] = useState(false);
+  const [savingTranscript, setSavingTranscript] = useState(false);
+
+  useEffect(() => {
+    const t = (project?.overviewTranscriptEdited || project?.overviewTranscriptRaw || "").trim();
+    setLocalTranscript(t);
+    setDirtyTranscript(false);
+  }, [project?.id, project?.overviewTranscriptEdited, project?.overviewTranscriptRaw]);
+
+  const hasAudio = Boolean(project?.overviewAudioUrl);
+
+  const startRec = async () => {
+    if (!project?.id) return;
+    if (recording) return;
+
+    try {
+      setSeconds(0);
+      setRecording(true);
+      setLocalTranscript("");
+      setDirtyTranscript(false);
+
+      recorderRef.current = await startAudioRecording({
+        onTick: setSeconds,
+        onSpeechChunk: (chunk) => {
+          setLocalTranscript((prev) => (prev ? `${prev} ${chunk}` : chunk));
+        },
+      });
+    } catch (e) {
+      console.error(e);
+      setRecording(false);
+      recorderRef.current = null;
+      alert("Microphone permission denied (or not available).");
+    }
+  };
+
+  const stopRec = async () => {
+    if (!recorderRef.current) return;
+    try {
+      const file = await recorderRef.current.stop();
+      recorderRef.current = null;
+      setRecording(false);
+      setSeconds(0);
+
+      await onUploadOverviewAudio?.(project.id, file, localTranscript);
+    } catch (e) {
+      console.error(e);
+      recorderRef.current = null;
+      setRecording(false);
+      setSeconds(0);
+      alert(e?.message || "Failed to save overview audio.");
+    }
+  };
+
+  const saveTranscript = async () => {
+    if (!project?.id) return;
+    setSavingTranscript(true);
+    try {
+      await onUpdateOverviewTranscript?.(project.id, localTranscript);
+      setDirtyTranscript(false);
+    } catch (e) {
+      console.error(e);
+      alert(e?.message || "Failed to save transcript.");
+    } finally {
+      setSavingTranscript(false);
+    }
+  };
+
   if (!project) return null;
+
+  const overviewLines = useMemo(() => parseOverview(project), [project]);
 
   return (
     <div className="px-6 pt-8 pb-28">
@@ -195,14 +338,63 @@ export default function ProjectView({
             {formatProjectDate(project.createdAt) || ""}
           </div>
 
-          <button
-            onClick={() => alert("Audio playback not wired yet.")}
-            className="mt-4 inline-flex items-center gap-2 text-[12px] font-semibold tracking-[0.12em]"
-            style={{ color: palette.accent }}
-          >
-            <Play className="w-4 h-4" />
-            PLAY AUDIO
-          </button>
+          {/* Overview audio controls */}
+          <div className="mt-4 flex items-center gap-3 flex-wrap">
+            {hasAudio ? (
+              <button
+                onClick={() => audioRef.current?.play?.()}
+                className="inline-flex items-center gap-2 text-[12px] font-semibold tracking-[0.12em]"
+                style={{ color: palette.accent }}
+              >
+                <Play className="w-4 h-4" />
+                PLAY OVERVIEW
+              </button>
+            ) : (
+              <button
+                onClick={startRec}
+                className="inline-flex items-center gap-2 text-[12px] font-semibold tracking-[0.12em]"
+                style={{ color: palette.accent }}
+              >
+                <Mic className="w-4 h-4" />
+                RECORD OVERVIEW
+              </button>
+            )}
+
+            {recording ? (
+              <>
+                <button
+                  onClick={stopRec}
+                  className="inline-flex items-center gap-2 text-[12px] font-semibold tracking-[0.12em]"
+                  style={{ color: "rgba(220,38,38,0.95)" }}
+                >
+                  <Square className="w-4 h-4" />
+                  STOP ({seconds}s)
+                </button>
+              </>
+            ) : null}
+
+            {hasAudio ? (
+              <button
+                onClick={() => {
+                  if (confirm("Remove the current overview audio?")) onClearOverviewAudio?.(project.id);
+                }}
+                className="inline-flex items-center gap-2 text-[12px] font-semibold tracking-[0.12em]"
+                style={{ color: "rgba(0,0,0,0.45)" }}
+              >
+                <X className="w-4 h-4" />
+                CLEAR
+              </button>
+            ) : null}
+          </div>
+
+          {hasAudio ? (
+            <audio
+              ref={audioRef}
+              className="mt-3 w-full max-w-[420px]"
+              controls
+              src={project.overviewAudioUrl}
+            />
+          ) : null}
         </div>
 
         <KebabMenu
@@ -215,7 +407,63 @@ export default function ProjectView({
         />
       </div>
 
-      {/* Overview card */}
+      {/* Transcript editor (only shows if audio exists or user recorded something) */}
+      {(hasAudio || localTranscript) ? (
+        <div className="mt-4">
+          <div
+            className="px-4 py-4"
+            style={{
+              background: "rgba(0,0,0,0.04)",
+              borderRadius: 6,
+              border: "1px solid rgba(0,0,0,0.06)",
+            }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[12px] font-semibold tracking-[0.18em] text-black/45">
+                TRANSCRIPT
+              </div>
+
+              <button
+                onClick={saveTranscript}
+                disabled={!dirtyTranscript || savingTranscript}
+                className="inline-flex items-center gap-2 text-[11px] font-semibold tracking-[0.14em]"
+                style={{
+                  color: dirtyTranscript ? palette.accent : "rgba(0,0,0,0.35)",
+                  opacity: savingTranscript ? 0.6 : 1,
+                }}
+              >
+                <Save className="w-4 h-4" />
+                {savingTranscript ? "SAVING" : "SAVE"}
+              </button>
+            </div>
+
+            <textarea
+              value={localTranscript}
+              onChange={(e) => {
+                setLocalTranscript(e.target.value);
+                setDirtyTranscript(true);
+              }}
+              placeholder={
+                project?.overviewTranscriptStatus === "processing"
+                  ? "Transcribing… (or type it manually)"
+                  : "Type or edit the transcript here."
+              }
+              rows={4}
+              className="mt-3 w-full bg-white/70 rounded-md p-3 text-[13px] leading-relaxed text-black/70 outline-none resize-none"
+              style={{ border: "1px solid rgba(0,0,0,0.06)" }}
+            />
+
+            <div className="mt-2 text-[12px] text-black/45">
+              Status:{" "}
+              <span style={{ color: "rgba(0,0,0,0.65)", fontWeight: 600 }}>
+                {project?.overviewTranscriptStatus || (localTranscript ? "ready" : "none")}
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Overview card (your existing list view) */}
       <div className="mt-5">
         <div
           className="px-4 py-4"
@@ -230,8 +478,8 @@ export default function ProjectView({
           </div>
 
           <ol className="mt-3 space-y-1 text-[13px] leading-relaxed text-black/70">
-            {parseOverview(project).length ? (
-              parseOverview(project).map((line, i) => (
+            {overviewLines.length ? (
+              overviewLines.map((line, i) => (
                 <li key={i}>
                   {i + 1}. {line}
                 </li>
@@ -247,7 +495,7 @@ export default function ProjectView({
       <div className="mt-10 space-y-10">
         {(project.sessions || []).map((session) => {
           const media = Array.isArray(session?.media) ? session.media : [];
-          const thumbs = media.filter((m) => m?.url); // ✅ no slice → all photos
+          const thumbs = media.filter((m) => m?.url);
 
           return (
             <div key={session.id}>
@@ -269,18 +517,11 @@ export default function ProjectView({
                 />
               </div>
 
-              {/* ✅ Horizontal scroll row */}
               <div
                 className="mt-3 flex gap-3 overflow-x-auto pb-2"
-                style={{
-                  WebkitOverflowScrolling: "touch",
-                  scrollbarWidth: "none",
-                }}
+                style={{ WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}
               >
-                {/* hide scrollbar (webkit) */}
-                <style>{`
-                  .hide-scrollbar::-webkit-scrollbar { display: none; }
-                `}</style>
+                <style>{`.hide-scrollbar::-webkit-scrollbar{display:none;}`}</style>
 
                 <div className="flex gap-3 hide-scrollbar">
                   {thumbs.length ? (
@@ -290,7 +531,7 @@ export default function ProjectView({
                         onClick={() => onOpenViewer?.(session.id, m.id)}
                         className="shrink-0 overflow-hidden"
                         style={{
-                          width: 108,            // size of each tile
+                          width: 108,
                           height: 108,
                           borderRadius: 0,
                           background: "rgba(0,0,0,0.10)",

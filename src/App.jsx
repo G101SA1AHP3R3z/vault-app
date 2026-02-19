@@ -96,6 +96,10 @@ function VaultShell() {
     renameProject,
     archiveProject,
     createInvite,
+uploadProjectOverviewAudio,
+updateProjectOverviewTranscript,
+clearProjectOverviewAudio,
+
 
     // sessions
     renameSession,
@@ -135,22 +139,30 @@ function VaultShell() {
     return "[ Projects ]";
   }, [tab]);
 
-  const handleCreateProject = async ({ title, tags, note }) => {
-    try {
-      const p = await addProject({ title, aiTags: tags, note });
-      setNewOpen(false);
+const handleCreateProject = async ({ title, tags, note, overviewAudioFile, overviewTranscript }) => {
+  try {
+    const p = await addProject({ title, aiTags: tags, note });
 
-      setActiveProject(p);
-      setView("project");
-
-      setPrefillSessionId(null);
-      setPrefillSessionTitle("First Fitting");
-      setAutoPromptMediaPicker(true);
-      setMediaOpen(true);
-    } catch (e) {
-      console.error(e);
+    // If they recorded an overview, attach it to the project doc (NOT session media).
+    if (overviewAudioFile) {
+      await uploadProjectOverviewAudio?.(p.id, overviewAudioFile, overviewTranscript || "");
     }
-  };
+
+    setNewOpen(false);
+
+    setActiveProject(p);
+    setView("project");
+
+    setPrefillSessionId(null);
+    setPrefillSessionTitle("First Fitting");
+    setAutoPromptMediaPicker(true);
+    setMediaOpen(true);
+  } catch (e) {
+    console.error(e);
+    alert(e?.message || "Failed to create project.");
+  }
+};
+
 
   const handleAddMedia = async ({ files, sessionId, sessionTitle }) => {
     if (!activeProject) return;
@@ -347,21 +359,25 @@ function VaultShell() {
             {/* PROJECT PAGE */}
             {view === "project" && activeProject && (
               <ProjectView
-                project={activeProject}
-                headerFont={headerFont}
-                palette={palette}
-                onBack={goBackFromProject}
-                onNewProject={() => setNewOpen(true)}
-                onEditProject={editProject}
-                onShareProject={shareProject}
-                onArchiveProject={removeProject}
-                onOpenViewer={mediaNav.openViewer}
-                onAddPhotosForSession={openAddPhotosForSession}
-                onAddSession={openAddSession}
-                onEditSession={editSession}
-                onShareSession={shareSession}
-                onDeleteSession={removeSession}
-              />
+  project={activeProject}
+  headerFont={headerFont}
+  palette={palette}
+  onBack={goBackFromProject}
+  onNewProject={() => setNewOpen(true)}
+  onEditProject={editProject}
+  onShareProject={shareProject}
+  onArchiveProject={removeProject}
+  onOpenViewer={mediaNav.openViewer}
+  onAddPhotosForSession={openAddPhotosForSession}
+  onAddSession={openAddSession}
+  onEditSession={editSession}
+  onShareSession={shareSession}
+  onDeleteSession={removeSession}
+  onUploadOverviewAudio={uploadProjectOverviewAudio}
+  onUpdateOverviewTranscript={updateProjectOverviewTranscript}
+  onClearOverviewAudio={clearProjectOverviewAudio}
+/>
+
             )}
 
             {/* Viewer overlay */}

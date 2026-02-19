@@ -1,6 +1,53 @@
 // /src/components/AddMediaModal.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { X, Camera, Plus, ChevronDown, Loader2, Upload } from "lucide-react";
+import { X, Camera, Plus, ChevronDown, Loader2, Upload, Mic, Square, AudioLines } from "lucide-react";
+
+function pickAudioMimeType() {
+  if (typeof window === "undefined") return "audio/webm";
+  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+  for (const c of candidates) {
+    try {
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported?.(c)) return c;
+    } catch {}
+  }
+  return "audio/webm";
+}
+
+async function startAudioRecording({ onTick }) {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const mimeType = pickAudioMimeType();
+  const recorder = new MediaRecorder(stream, { mimeType });
+
+  const chunks = [];
+  let t = 0;
+
+  const interval = setInterval(() => {
+    t += 1;
+    onTick?.(t);
+  }, 1000);
+
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) chunks.push(e.data);
+  };
+
+  const stop = () =>
+    new Promise((resolve) => {
+      recorder.onstop = () => {
+        clearInterval(interval);
+        stream.getTracks().forEach((tr) => tr.stop());
+
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+
+        const ext = blob.type.includes("mp4") ? "m4a" : "webm";
+        const file = new File([blob], `audio_${Date.now()}.${ext}`, { type: blob.type });
+        resolve(file);
+      };
+      recorder.stop();
+    });
+
+  recorder.start();
+  return { stop };
+}
 
 export default function AddMediaModal({
   open,
@@ -10,8 +57,8 @@ export default function AddMediaModal({
   existingSessions = [],
 
   // behavior
-  autoPrompt = false, // opens file picker on open
-  autoSubmit = true, // auto-upload once files selected
+  autoPrompt = false,
+  autoSubmit = true,
 
   // prefill from App.jsx
   defaultSessionId = null,
@@ -35,12 +82,17 @@ export default function AddMediaModal({
   const [newSessionTitle, setNewSessionTitle] = useState("");
 
   const [files, setFiles] = useState([]); // up to 5
-  const [previews, setPreviews] = useState([]); // object URLs
+  const [previews, setPreviews] = useState([]); // object URLs (for images/videos only)
 
   const [isUploading, setIsUploading] = useState(false);
   const [uploaded, setUploaded] = useState(false);
 
   const [showSessionPicker, setShowSessionPicker] = useState(false);
+
+  // Audio recording
+  const [recording, setRecording] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const recorderRef = useRef(null);
 
   const cameraInputRef = useRef(null);
   const uploadInputRef = useRef(null);
@@ -49,6 +101,9 @@ export default function AddMediaModal({
     const all = [];
     (existingSessions || []).forEach((s) => {
       (s?.media || []).forEach((m) => {
+        // Skip audio in thumbnails
+        if (m?.type === "audio") return;
+
         const url =
           (typeof m?.url === "string" && m.url.trim()) ||
           (typeof m?.coverPhoto === "string" && m.coverPhoto.trim()) ||
@@ -66,9 +121,13 @@ export default function AddMediaModal({
       setUploaded(false);
       setIsUploading(false);
 
+      // stop recording if modal reopened weirdly
+      setRecording(false);
+      setSeconds(0);
+      recorderRef.current = null;
+
       const hasSessions = (existingSessions || []).length > 0;
 
-      // Prefer explicit defaults
       if (defaultSessionId && hasSessions) {
         setSessionMode("existing");
         setSessionId(defaultSessionId);
@@ -78,7 +137,6 @@ export default function AddMediaModal({
         setSessionId(existingSessions?.[0]?.id || "");
         setNewSessionTitle(defaultSessionTitle.trim());
       } else {
-        // fallback
         setSessionMode(hasSessions ? "existing" : "new");
         setSessionId(existingSessions?.[0]?.id || "");
         setNewSessionTitle("");
@@ -112,7 +170,7 @@ export default function AddMediaModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const canClose = !isUploading;
+  const canClose = !isUploading && !recording;
 
   const close = () => {
     setVisible(false);
@@ -125,7 +183,18 @@ export default function AddMediaModal({
         URL.revokeObjectURL(u);
       } catch {}
     });
-    setPreviews(nextFiles.map((f) => URL.createObjectURL(f)));
+
+    // Only create object URLs for images/videos (audio gets a clean tile)
+    const urls = nextFiles.map((f) => {
+      const t = f?.type || "";
+      if (t.startsWith("audio")) return "";
+      try {
+        return URL.createObjectURL(f);
+      } catch {
+        return "";
+      }
+    });
+    setPreviews(urls);
   };
 
   const pushFiles = (picked) => {
@@ -160,20 +229,57 @@ export default function AddMediaModal({
     });
   };
 
+  // Audio record handlers
+  const startRec = async () => {
+    if (isUploading) return;
+    if (files.length >= 5) {
+      alert("You can add up to 5 items.");
+      return;
+    }
+    try {
+      setSeconds(0);
+      setRecording(true);
+      recorderRef.current = await startAudioRecording({ onTick: setSeconds });
+    } catch (e) {
+      console.error(e);
+      setRecording(false);
+      recorderRef.current = null;
+      alert("Microphone permission denied (or not available).");
+    }
+  };
+
+  const stopRec = async () => {
+    if (!recorderRef.current) return;
+    try {
+      const file = await recorderRef.current.stop();
+      recorderRef.current = null;
+      setRecording(false);
+      setSeconds(0);
+
+      pushFiles([file]); // reuse the existing pipeline
+    } catch (e) {
+      console.error(e);
+      recorderRef.current = null;
+      setRecording(false);
+      setSeconds(0);
+      alert("Recording failed. Check console.");
+    }
+  };
+
   // Auto upload
   useEffect(() => {
     if (!OPEN) return;
     if (!autoSubmit) return;
     if (isUploading) return;
     if (uploaded) return;
+    if (recording) return;
     if (files.length === 0) return;
 
     const run = async () => {
       setIsUploading(true);
       try {
         const sid = sessionMode === "existing" ? sessionId : null;
-        const title =
-          sessionMode === "new" ? (newSessionTitle || "New Session").trim() : "";
+        const title = sessionMode === "new" ? (newSessionTitle || "New Session").trim() : "";
 
         await onAddMedia?.({
           files,
@@ -190,10 +296,10 @@ export default function AddMediaModal({
       }
     };
 
-    const t = setTimeout(run, 180); // small grace period for “oops” removals
+    const t = setTimeout(run, 180);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files.length, autoSubmit]);
+  }, [files.length, autoSubmit, recording]);
 
   if (!mounted) return null;
 
@@ -294,20 +400,21 @@ export default function AddMediaModal({
                   opacity: canClose ? 1 : 0.5,
                 }}
                 aria-label="Close"
-                title={canClose ? "Close" : "Uploading…"}
+                title={canClose ? "Close" : recording ? "Recording…" : "Uploading…"}
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
           </div>
 
-          {/* Recent + camera */}
+          {/* Quick pick */}
           <div className="px-6 pb-4">
             <div className="text-[11px] font-semibold tracking-[0.18em] text-black/45">
               QUICK PICK
             </div>
 
             <div className="mt-3 flex gap-3 overflow-x-auto pb-2">
+              {/* Camera */}
               <button
                 type="button"
                 onClick={() => cameraInputRef.current?.click()}
@@ -321,8 +428,38 @@ export default function AddMediaModal({
                 }}
                 aria-label="Camera"
                 title="Camera"
+                disabled={isUploading || recording}
               >
                 <Camera className="w-5 h-5" style={{ color: "rgba(0,0,0,0.55)" }} />
+              </button>
+
+              {/* Record audio */}
+              <button
+                type="button"
+                onClick={recording ? stopRec : startRec}
+                className="shrink-0 grid place-items-center"
+                style={{
+                  width: 80,
+                  height: 80,
+                  borderRadius: 12,
+                  background: recording ? "rgba(255,77,46,0.12)" : "rgba(0,0,0,0.04)",
+                  border: `1px solid ${palette.line}`,
+                  opacity: isUploading ? 0.6 : 1,
+                }}
+                aria-label={recording ? "Stop recording" : "Record audio"}
+                title={recording ? `Stop (${seconds}s)` : "Record audio"}
+                disabled={isUploading}
+              >
+                {recording ? (
+                  <div className="flex flex-col items-center">
+                    <Square className="w-5 h-5" style={{ color: "rgba(255,77,46,0.95)" }} />
+                    <div className="mt-1 text-[10px] font-semibold" style={{ color: "rgba(0,0,0,0.55)" }}>
+                      {seconds}s
+                    </div>
+                  </div>
+                ) : (
+                  <Mic className="w-5 h-5" style={{ color: "rgba(0,0,0,0.55)" }} />
+                )}
               </button>
 
               {recentThumbs.length === 0 ? (
@@ -369,7 +506,7 @@ export default function AddMediaModal({
                 border: `1px solid ${palette.line}`,
                 color: "rgba(0,0,0,0.75)",
               }}
-              disabled={isUploading}
+              disabled={isUploading || recording}
             >
               <div className="text-[12px] font-semibold">
                 Add to{" "}
@@ -402,7 +539,7 @@ export default function AddMediaModal({
                       type="button"
                       onClick={() => setSessionMode("existing")}
                       className="flex-1 py-2 text-[11px] font-semibold tracking-[0.18em]"
-                      disabled={isUploading}
+                      disabled={isUploading || recording}
                       style={{
                         borderRadius: 10,
                         border: `1px solid ${palette.line}`,
@@ -425,7 +562,7 @@ export default function AddMediaModal({
                     type="button"
                     onClick={() => setSessionMode("new")}
                     className="flex-1 py-2 text-[11px] font-semibold tracking-[0.18em]"
-                    disabled={isUploading}
+                    disabled={isUploading || recording}
                     style={{
                       borderRadius: 10,
                       border: `1px solid ${palette.line}`,
@@ -447,7 +584,7 @@ export default function AddMediaModal({
                 {sessionMode === "existing" ? (
                   <select
                     className="w-full px-3 py-3 text-sm font-semibold outline-none"
-                    disabled={isUploading || existingSessions.length === 0}
+                    disabled={isUploading || recording || existingSessions.length === 0}
                     style={{
                       borderRadius: 10,
                       background: "rgba(255,255,255,0.70)",
@@ -469,7 +606,7 @@ export default function AddMediaModal({
                     type="text"
                     placeholder="Session name (e.g. Second fitting)"
                     className="w-full px-3 py-3 text-sm font-semibold outline-none"
-                    disabled={isUploading}
+                    disabled={isUploading || recording}
                     style={{
                       borderRadius: 10,
                       background: "rgba(255,255,255,0.70)",
@@ -495,14 +632,14 @@ export default function AddMediaModal({
               <button
                 type="button"
                 onClick={() => uploadInputRef.current?.click()}
-                disabled={isUploading || files.length >= 5}
+                disabled={isUploading || recording || files.length >= 5}
                 className="h-8 px-3 inline-flex items-center gap-2 text-[11px] font-semibold"
                 style={{
                   borderRadius: 10,
                   background: "rgba(255,255,255,0.70)",
                   border: `1px solid ${palette.line}`,
                   color: "rgba(0,0,0,0.72)",
-                  opacity: isUploading || files.length >= 5 ? 0.5 : 1,
+                  opacity: isUploading || recording || files.length >= 5 ? 0.5 : 1,
                 }}
               >
                 <Plus className="w-4 h-4" /> Add more
@@ -520,49 +657,66 @@ export default function AddMediaModal({
                   fontSize: 12,
                 }}
               >
-                Pick up to 5 photos/videos. They’ll upload automatically.
+                Pick up to 5 photos/videos/audio. They’ll upload automatically.
               </div>
             ) : (
               <div className="flex gap-3 overflow-x-auto pb-2">
-                {previews.map((u, idx) => (
-                  <div
-                    key={u}
-                    className="shrink-0 relative overflow-hidden"
-                    style={{
-                      width: 88,
-                      height: 88,
-                      borderRadius: 12,
-                      border: `1px solid ${palette.line}`,
-                      background: "rgba(255,255,255,0.55)",
-                    }}
-                  >
-                    <img
-                      src={u}
-                      alt=""
-                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                      draggable={false}
-                    />
+                {files.map((f, idx) => {
+                  const isAudio = (f?.type || "").startsWith("audio");
+                  const url = previews[idx] || "";
 
-                    {!isUploading && !uploaded && (
-                      <button
-                        type="button"
-                        onClick={() => removeAt(idx)}
-                        className="absolute top-2 right-2 w-7 h-7 grid place-items-center"
-                        style={{
-                          borderRadius: 999,
-                          background: "rgba(255,255,255,0.82)",
-                          border: `1px solid ${palette.line}`,
-                          color: "rgba(0,0,0,0.70)",
-                          backdropFilter: "blur(10px)",
-                        }}
-                        aria-label="Remove"
-                        title="Remove"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                  return (
+                    <div
+                      key={`${f.name}-${idx}`}
+                      className="shrink-0 relative overflow-hidden"
+                      style={{
+                        width: 88,
+                        height: 88,
+                        borderRadius: 12,
+                        border: `1px solid ${palette.line}`,
+                        background: "rgba(255,255,255,0.55)",
+                      }}
+                    >
+                      {isAudio ? (
+                        <div className="w-full h-full flex flex-col items-center justify-center">
+                          <AudioLines className="w-5 h-5" style={{ color: "rgba(0,0,0,0.55)" }} />
+                          <div
+                            className="mt-2 px-2 text-[10px] font-semibold text-center"
+                            style={{ color: "rgba(0,0,0,0.55)" }}
+                          >
+                            Audio
+                          </div>
+                        </div>
+                      ) : (
+                        <img
+                          src={url}
+                          alt=""
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          draggable={false}
+                        />
+                      )}
+
+                      {!isUploading && !uploaded && (
+                        <button
+                          type="button"
+                          onClick={() => removeAt(idx)}
+                          className="absolute top-2 right-2 w-7 h-7 grid place-items-center"
+                          style={{
+                            borderRadius: 999,
+                            background: "rgba(255,255,255,0.82)",
+                            border: `1px solid ${palette.line}`,
+                            color: "rgba(0,0,0,0.70)",
+                            backdropFilter: "blur(10px)",
+                          }}
+                          aria-label="Remove"
+                          title="Remove"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -576,7 +730,9 @@ export default function AddMediaModal({
             }}
           >
             <div className="text-xs font-semibold" style={{ color: "rgba(0,0,0,0.55)" }}>
-              {isUploading
+              {recording
+                ? "Recording…"
+                : isUploading
                 ? "Uploading…"
                 : uploaded
                 ? "Uploaded. Tap outside to close."
@@ -589,7 +745,9 @@ export default function AddMediaModal({
               className="h-10 px-4 inline-flex items-center gap-2"
               style={{
                 borderRadius: 12,
-                background: isUploading
+                background: recording
+                  ? "rgba(255,77,46,0.14)"
+                  : isUploading
                   ? "rgba(0,0,0,0.06)"
                   : uploaded
                   ? "rgba(84,230,193,0.16)"
@@ -598,13 +756,18 @@ export default function AddMediaModal({
                 color: "rgba(0,0,0,0.70)",
               }}
             >
-              {isUploading ? (
+              {recording ? (
+                <Mic className="w-4 h-4" />
+              ) : isUploading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <Upload className="w-4 h-4" />
               )}
-              <span className="text-[11px] font-semibold tracking-[0.18em]" style={{ textTransform: "uppercase" }}>
-                {isUploading ? "Saving" : uploaded ? "Saved" : "Ready"}
+              <span
+                className="text-[11px] font-semibold tracking-[0.18em]"
+                style={{ textTransform: "uppercase" }}
+              >
+                {recording ? "Recording" : isUploading ? "Saving" : uploaded ? "Saved" : "Ready"}
               </span>
             </div>
           </div>
@@ -621,7 +784,7 @@ export default function AddMediaModal({
           <input
             ref={uploadInputRef}
             type="file"
-            accept="image/*,video/*"
+            accept="image/*,video/*,audio/*"
             multiple
             className="hidden"
             onChange={handleUploadPick}
