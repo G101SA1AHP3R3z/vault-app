@@ -88,7 +88,7 @@ function KebabMenu({ items = [], palette }) {
   );
 }
 
-export default function LibraryGrid({ onQuickAdd, onNew, title = "[ Projects ]" }) {
+export default function LibraryGrid({ onQuickAdd, onNew }) {
   const { filteredProjects, setActiveProject, setView, renameProject, deleteProject, createInvite } =
     useVault();
 
@@ -152,8 +152,8 @@ export default function LibraryGrid({ onQuickAdd, onNew, title = "[ Projects ]" 
       {/* Header (match screenshot) */}
       <div className="px-6 pt-6 pb-5 flex items-center justify-between">
         <div className="text-[18px] font-semibold tracking-[0.02em]" style={{ color: palette.ink }}>
-  {title}
-</div>
+          [ Projects ]
+        </div>
 
         <button
           onClick={() => onNew?.()}
@@ -167,15 +167,33 @@ export default function LibraryGrid({ onQuickAdd, onNew, title = "[ Projects ]" 
       {/* Grid */}
       <div className="px-6">
         <div className="grid grid-cols-2 gap-5">
+          {/* Optional “empty slot” tile like screenshot */}
+          <button
+            onClick={() => onNew?.()}
+            className="aspect-square w-full"
+            style={{ background: "rgba(0,0,0,0.08)", borderRadius: 0 }}
+            aria-label="Create new project"
+            title="Create new project"
+          />
+
           {projects.map((project) => {
             const dateText = formatProjectDate(project.createdAt);
 
             return (
               <div key={project.id} className="w-full">
-                <button
+                {/* Use a div so kebab/camera can be real buttons without nesting errors */}
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => openProject(project)}
-                  className="w-full text-left active:scale-[0.995] transition-transform"
-                  style={{ WebkitTapHighlightColor: "transparent" }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openProject(project);
+                    }
+                  }}
+                  className="w-full text-left active:scale-[0.995] transition-transform cursor-pointer select-none"
+                  style={{ WebkitTapHighlightColor: "transparent", outline: "none" }}
                   aria-label={`Open ${project.title}`}
                 >
                   {/* Image */}
@@ -240,7 +258,7 @@ export default function LibraryGrid({ onQuickAdd, onNew, title = "[ Projects ]" 
                       </div>
                     ) : null}
                   </div>
-                </button>
+                </div>
               </div>
             );
           })}
