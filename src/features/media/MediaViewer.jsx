@@ -38,7 +38,7 @@ export default function MediaViewer({
 }) {
   const isEmbedded = mode === "embedded";
 
-  // iOS Photos-like spacing between slides
+  // iOS-like spacing between slides
   const GAP_PX = 16;
 
   const [isAddPinMode, setIsAddPinMode] = useState(false);
@@ -73,7 +73,7 @@ export default function MediaViewer({
     };
   }, [media?.id, moreFromSession]);
 
-  // Preload + decode neighbors to reduce hitching on swipe-in
+  // Preload + decode neighbors (reduces hitch)
   useEffect(() => {
     const list = [neighbors.prevSrc, neighbors.nextSrc].filter(Boolean);
     if (!list.length) return;
@@ -105,7 +105,7 @@ export default function MediaViewer({
     onPrev: () => onPrev?.(),
     onNext: () => onNext?.(),
     onSwipeDown,
-    mediaKey: media?.id, // IMPORTANT: reset transform AFTER media swaps
+    mediaKey: media?.id, // IMPORTANT: prevents “refresh” snap
     gapPx: GAP_PX,
   });
 
@@ -208,7 +208,8 @@ export default function MediaViewer({
 
   return (
     <Outer>
-      <div className={isEmbedded ? "w-full" : "h-full w-full overflow-y-auto"}>
+      {/* IMPORTANT: modal viewer should NOT be scrollable; let inner panels scroll */}
+      <div className={isEmbedded ? "w-full" : "h-full w-full overflow-hidden"}>
         <MediaStage
           isEmbedded={isEmbedded}
           stageRef={stageRef}

@@ -58,13 +58,14 @@ export default function MediaStage({
   };
 
   return (
-    <div className={isEmbedded ? "w-full" : "w-full"}>
+    <div className="w-full">
       <div
         ref={stageRef}
         className={`relative w-full overflow-hidden bg-black/5 ${
           isAddPinMode && !isFocusMode ? "cursor-crosshair" : ""
         }`}
-        style={{ touchAction: "pan-y", height: stageHeight }}
+        // IMPORTANT: don’t allow the browser to pan/scroll inside the photo stage
+        style={{ touchAction: "none", height: stageHeight }}
         onClick={onClickToAddPin}
         onPointerDown={onStagePointerDown}
         onPointerMove={onStagePointerMove}
@@ -114,7 +115,6 @@ export default function MediaStage({
           className="absolute inset-0 w-full h-full"
           style={{
             willChange: "transform",
-            // CSS custom property in JSX (works in .jsx)
             "--gap": `${gapPx}px`,
           }}
         >
@@ -135,7 +135,7 @@ export default function MediaStage({
             )}
           </div>
 
-          {/* Current (middle) */}
+          {/* Current */}
           <div className="absolute inset-0 w-full h-full" style={{ left: "0%" }}>
             {currentSrc && (
               <img
@@ -218,7 +218,7 @@ export default function MediaStage({
           </div>
         </div>
 
-        {/* Trash (doesn't move with slides) */}
+        {/* Trash drop zone */}
         {!isFocusMode && (
           <div
             ref={trashRef}
