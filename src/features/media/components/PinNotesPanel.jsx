@@ -15,12 +15,10 @@ export default function PinNotesPanel({
 
   openPinEditor,
 
-  // session strip
   media,
   moreFromSession,
   onSelectMedia,
 }) {
-  // show only pins that have at least label/note text
   const pinNotes = useMemo(() => {
     return hotspots
       .map((h, idx) => {
@@ -53,11 +51,20 @@ export default function PinNotesPanel({
         ) : (
           pinNotes.map((p) => {
             const isSelected = p.id === selectedPin?.id;
+
             return (
-              <button
+              <div
                 key={p.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => setSelectedPinId?.(p.id)}
-                className="w-full flex items-start gap-3 text-left"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelectedPinId?.(p.id);
+                  }
+                }}
+                className="w-full flex items-start gap-3 text-left cursor-pointer select-none"
                 style={{ WebkitTapHighlightColor: "transparent" }}
                 aria-label={`Pin ${p._index}`}
               >
@@ -94,7 +101,7 @@ export default function PinNotesPanel({
                 >
                   <Pencil className="w-4 h-4 text-black/55" />
                 </button>
-              </button>
+              </div>
             );
           })
         )}
