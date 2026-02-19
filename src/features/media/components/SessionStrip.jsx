@@ -8,12 +8,12 @@ export default function SessionStrip({
 }) {
   const scrollRef = useRef(null);
 
+  // NO SLICING. NO WINDOWING. Just grab the URLs.
+  // Rendering the full list stops React from destroying the DOM nodes when you swipe.
   const list = useMemo(() => {
     return Array.isArray(moreFromSession) ? moreFromSession.filter((m) => m?.url) : [];
   }, [moreFromSession]);
 
-  // FIX: Manual horizontal math replaces the treacherous `scrollIntoView()`.
-  // This guarantees absolutely zero vertical layout shifting (the "hop").
   useEffect(() => {
     if (!media?.id || !scrollRef.current) return;
     
@@ -21,13 +21,11 @@ export default function SessionStrip({
     const activeEl = container.querySelector(`[data-media-id="${media.id}"]`);
     
     if (activeEl) {
-      // Calculate the exact pixel distance to slide the element into the dead center
       const centerPosition = 
         activeEl.offsetLeft - 
         (container.clientWidth / 2) + 
         (activeEl.clientWidth / 2);
 
-      // Force the scroll to happen strictly on the horizontal axis
       container.scrollTo({
         left: centerPosition,
         behavior: "smooth",
@@ -78,8 +76,8 @@ export default function SessionStrip({
                   src={m.thumbnailUrl || m.url}
                   alt=""
                   className="w-full h-full object-cover"
-                  loading="lazy"
                   decoding="async"
+                  /* NUKED loading="lazy" so they render instantly and don't flash gray on fast swipes */
                 />
               </div>
             </button>
