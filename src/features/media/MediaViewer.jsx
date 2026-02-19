@@ -201,13 +201,14 @@ export default function MediaViewer({
   };
 
   const Outer = ({ children }) => {
+    // FIXED: Stripped the 'relative' class off the modal view so it stays locked to the viewport
     if (isEmbedded) return <div className="w-full relative">{children}</div>;
-    return <div className="fixed inset-0 z-[100] bg-white relative">{children}</div>;
+    return <div className="fixed inset-0 z-[100] bg-white">{children}</div>;
   };
 
   return (
     <Outer>
-      <div className={isEmbedded ? "w-full h-full" : "h-full w-full overflow-y-auto"}>
+      <div className={isEmbedded ? "w-full h-full relative" : "h-full w-full overflow-y-auto relative"}>
         <MediaStage
           isEmbedded={isEmbedded}
           stageRef={stageRef}
@@ -237,7 +238,6 @@ export default function MediaViewer({
             swipe.onPointerDown(e);
           }}
           onStagePointerMove={(e) => {
-            // HARD ROUTING: Prevent dual-calculations
             if (drag.draggingPinId) {
               drag.onStagePointerMove?.(e);
             } else {
