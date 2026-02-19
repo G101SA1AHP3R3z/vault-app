@@ -37,8 +37,6 @@ export default function MediaViewer({
   onDeleteHotspot,
 }) {
   const isEmbedded = mode === "embedded";
-
-  // iOS-like spacing between slides
   const GAP_PX = 16;
 
   const [isAddPinMode, setIsAddPinMode] = useState(false);
@@ -73,22 +71,25 @@ export default function MediaViewer({
     };
   }, [media?.id, moreFromSession]);
 
-  // Preload + decode neighbors (reduces hitch)
   useEffect(() => {
-    const list = [neighbors.prevSrc, neighbors.nextSrc].filter(Boolean);
-    if (!list.length) return;
+    if (!media?.id) return;
+    if (!Array.isArray(moreFromSession) || moreFromSession.length < 2) return;
 
-    list.forEach((src) => {
+    const idx = moreFromSession.findIndex((m) => m?.id === media.id);
+    if (idx < 0) return;
+
+    const candidates = [moreFromSession[idx - 1], moreFromSession[idx + 1]]
+      .filter(Boolean)
+      .map((m) => m?.url)
+      .filter(Boolean);
+
+    candidates.forEach((src) => {
       const img = new Image();
       img.decoding = "async";
       img.src = src;
-      if (typeof img.decode === "function") {
-        img.decode().catch(() => {});
-      }
     });
-  }, [neighbors.prevSrc, neighbors.nextSrc]);
+  }, [media?.id, moreFromSession]);
 
-  // Reset UI when switching media
   useEffect(() => {
     setIsAddPinMode(false);
     setIsFocusMode(false);
@@ -105,8 +106,6 @@ export default function MediaViewer({
     onPrev: () => onPrev?.(),
     onNext: () => onNext?.(),
     onSwipeDown,
-    mediaKey: media?.id, // IMPORTANT: prevents “refresh” snap
-    gapPx: GAP_PX,
   });
 
   const drag = usePinDrag({
@@ -202,14 +201,13 @@ export default function MediaViewer({
   };
 
   const Outer = ({ children }) => {
-    if (isEmbedded) return <div className="w-full">{children}</div>;
-    return <div className="fixed inset-0 z-[100] bg-white">{children}</div>;
+    if (isEmbedded) return <div className="w-full relative">{children}</div>;
+    return <div className="fixed inset-0 z-[100] bg-white relative">{children}</div>;
   };
 
   return (
     <Outer>
-      {/* IMPORTANT: modal viewer should NOT be scrollable; let inner panels scroll */}
-      <div className={isEmbedded ? "w-full" : "h-full w-full overflow-hidden"}>
+      <div className={isEmbedded ? "w-full h-full" : "h-full w-full overflow-y-auto"}>
         <MediaStage
           isEmbedded={isEmbedded}
           stageRef={stageRef}
@@ -229,26 +227,38 @@ export default function MediaViewer({
           onPinPointerDown={drag.onPinPointerDown}
           onClickToAddPin={handleStageClickToAddPin}
           onDeleteMedia={onDeleteMedia}
-          gapPx={GAP_PX}
           onBack={() => {
             setIsAddPinMode(false);
             setIsFocusMode(false);
             setSelectedPinId(null);
             onBack?.();
           }}
-          onStagePointerDown={(e) => swipe.onPointerDown(e)}
+          onStagePointerDown={(e) => {
+            swipe.onPointerDown(e);
+          }}
           onStagePointerMove={(e) => {
-            drag.onStagePointerMove?.(e);
-            if (!drag.draggingPinId) swipe.onPointerMove(e);
+            // HARD ROUTING: Prevent dual-calculations
+            if (drag.draggingPinId) {
+              drag.onStagePointerMove?.(e);
+            } else {
+              swipe.onPointerMove(e);
+            }
           }}
           onStagePointerUp={(e) => {
-            drag.onStagePointerUp?.(e);
-            if (!drag.draggingPinId) swipe.onPointerEnd(e);
+            if (drag.draggingPinId) {
+              drag.onStagePointerUp?.(e);
+            } else {
+              swipe.onPointerEnd(e);
+            }
           }}
           onStagePointerCancel={(e) => {
-            drag.onStagePointerUp?.(e);
-            if (!drag.draggingPinId) swipe.onPointerEnd(e);
+            if (drag.draggingPinId) {
+              drag.onStagePointerUp?.(e);
+            } else {
+              swipe.onPointerEnd(e);
+            }
           }}
+          gapPx={GAP_PX}
         />
 
         {!isFocusMode && (
@@ -275,8 +285,12 @@ export default function MediaViewer({
           headerFont={headerFont}
           palette={palette}
           onClose={() => setPinOpen(false)}
-          onSave={savePinEdits}
-          onDelete={deletePin}
+          onSave={async (draft) => {
+            await savePinEdits(draft);
+          }}
+          onDelete={async () => {
+            await deletePin();
+          }}
         />
       )}
     </Outer>
