@@ -12,17 +12,25 @@ export default function SessionStrip({
     return Array.isArray(moreFromSession) ? moreFromSession.filter((m) => m?.url) : [];
   }, [moreFromSession]);
 
-  // FIX: Smoothly glide the scrollbar to keep the active thumbnail visible, 
-  // instead of destroying and recreating DOM nodes to fake a window.
+  // FIX: Manual horizontal math replaces the treacherous `scrollIntoView()`.
+  // This guarantees absolutely zero vertical layout shifting (the "hop").
   useEffect(() => {
     if (!media?.id || !scrollRef.current) return;
     
-    const activeEl = scrollRef.current.querySelector(`[data-media-id="${media.id}"]`);
+    const container = scrollRef.current;
+    const activeEl = container.querySelector(`[data-media-id="${media.id}"]`);
+    
     if (activeEl) {
-      activeEl.scrollIntoView({
+      // Calculate the exact pixel distance to slide the element into the dead center
+      const centerPosition = 
+        activeEl.offsetLeft - 
+        (container.clientWidth / 2) + 
+        (activeEl.clientWidth / 2);
+
+      // Force the scroll to happen strictly on the horizontal axis
+      container.scrollTo({
+        left: centerPosition,
         behavior: "smooth",
-        block: "nearest",
-        inline: "center",
       });
     }
   }, [media?.id]);
