@@ -1,9 +1,5 @@
 import { useEffect, useRef } from "react";
 
-/**
- * iOS-like swipe with interactive drag and slide.
- * Bypasses React state entirely for 60fps native-feeling dragging.
- */
 export default function useSwipeNav({
   enabled = true,
   carouselRef,
@@ -12,9 +8,10 @@ export default function useSwipeNav({
   onSwipeDown,
   isBlocked = false,
   stageRef = null,
-  animationMs = 260,
+  animationMs = 300, // Slightly longer for a softer spring feel
   canPrev = true,
   canNext = true,
+  gapPx = 16, // Catching the gap so we can do the math right
 }) {
   const swipeRef = useRef({
     down: false,
@@ -59,8 +56,6 @@ export default function useSwipeNav({
 
   const onPointerDown = (e) => {
     if (!enabled || isBlocked) return;
-    
-    // KILL SWITCH: If touching a button or interactive UI, abort the swipe immediately.
     if (e.target.closest('button') || e.target.closest('[data-noswipe]')) return;
 
     const x = e.clientX ?? e.touches?.[0]?.clientX;
@@ -121,20 +116,24 @@ export default function useSwipeNav({
   };
 
   const springBack = (fromDx) => {
-    const overshoot = Math.max(-32, Math.min(32, -fromDx * 0.08));
-    setTransform(overshoot, `transform ${animationMs * 0.6}ms cubic-bezier(0.22, 1, 0.36, 1)`);
+    // Softer spring math
+    const overshoot = Math.max(-40, Math.min(40, -fromDx * 0.12));
+    setTransform(overshoot, `transform ${animationMs * 0.7}ms cubic-bezier(0.25, 1, 0.5, 1)`);
 
     setTimeout(() => {
-      setTransform(0, `transform ${animationMs * 0.4}ms ease-out`);
+      setTransform(0, `transform ${animationMs * 0.5}ms ease-out`);
       setTimeout(() => {
         reset();
-      }, animationMs * 0.4 + 20);
-    }, animationMs * 0.6 + 20);
+      }, animationMs * 0.5 + 20);
+    }, animationMs * 0.7 + 20);
   };
 
   const commitSlide = (dir, w) => {
-    const targetX = dir === 1 ? -w : w;
-    setTransform(targetX, `transform ${animationMs}ms cubic-bezier(0.22, 1, 0.36, 1)`);
+    // THE FIX: Travel the full width PLUS the gap to avoid the 16px teleportation jolt
+    const targetX = dir === 1 ? -(w + gapPx) : (w + gapPx);
+    
+    // Smooth ease-out curve so it glides into place instead of slamming into a brick wall
+    setTransform(targetX, `transform ${animationMs}ms cubic-bezier(0.25, 1, 0.45, 1)`);
 
     setTimeout(() => {
       if (dir === 1) onNext?.();

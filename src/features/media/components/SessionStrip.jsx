@@ -8,8 +8,6 @@ export default function SessionStrip({
 }) {
   const scrollRef = useRef(null);
 
-  // NO SLICING. NO WINDOWING. Just grab the URLs.
-  // Rendering the full list stops React from destroying the DOM nodes when you swipe.
   const list = useMemo(() => {
     return Array.isArray(moreFromSession) ? moreFromSession.filter((m) => m?.url) : [];
   }, [moreFromSession]);
@@ -61,8 +59,9 @@ export default function SessionStrip({
               title="Open photo"
             >
               <div
+                // STRIPPED opacity-60. No more gray-out flashing.
                 className={`w-[86px] h-[86px] overflow-hidden transition-all duration-300 ease-out ${
-                  active ? "opacity-100 scale-100 shadow-md" : "opacity-60 scale-95 hover:opacity-100"
+                  active ? "scale-100 shadow-md" : "scale-95 hover:scale-100"
                 }`}
                 style={{
                   borderRadius: 0,
@@ -77,7 +76,6 @@ export default function SessionStrip({
                   alt=""
                   className="w-full h-full object-cover"
                   decoding="async"
-                  /* NUKED loading="lazy" so they render instantly and don't flash gray on fast swipes */
                 />
               </div>
             </button>
