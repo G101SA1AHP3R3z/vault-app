@@ -50,14 +50,12 @@ export default function MediaViewer({
   const isEmbedded = mode === "embedded";
 
   /**
-   * iOS Photos-inspired:
-   * - immersive: black bg, no chrome
-   * - controls: light bg, nav + filmstrip + bottom bar, no photo shift
-   * - info: light bg, nav + bottom bar stay (i selected), filmstrip hidden,
-   *         photo "appears" top-half via clip-path + notes sheet floats up
+   * - immersive: black bg, no chrome visible (but layout reserved so photo never jumps)
+   * - controls: light bg, top nav + filmstrip + bottom bar
+   * - info: light bg, top nav + bottom bar stay (i selected), filmstrip hidden,
+   *         photo clipped to top half + notes sheet floats up
    */
   const [viewMode, setViewMode] = useState("immersive"); // "immersive" | "controls" | "info"
-
   const [isAddPinMode, setIsAddPinMode] = useState(false);
   const [selectedPinId, setSelectedPinId] = useState(null);
 
@@ -93,6 +91,7 @@ export default function MediaViewer({
   const isControls = viewMode === "controls";
   const isImmersive = viewMode === "immersive";
 
+  // Force true black / true paper (no gray bleed)
   const bg = isImmersive ? "#000000" : "#FFFEFA";
 
   // Float illusion: clip photo bottom half + slide sheet up
@@ -190,7 +189,7 @@ export default function MediaViewer({
     }
   };
 
-  // Tap anywhere toggles immersive <-> controls ONLY (not info)
+  // Tap photo toggles immersive <-> controls ONLY (not info)
   const handleStageTapToggle = () => {
     if (isEmbedded) return;
     if (pinOpen) return;
@@ -210,156 +209,252 @@ export default function MediaViewer({
     return (
       <div
         className="fixed inset-0 z-[100]"
-        style={{ background: bg, overscrollBehavior: "contain" }}
+        style={{
+          background: bg,
+          overscrollBehavior: "contain",
+        }}
       >
         {children}
       </div>
     );
   };
 
-  const showNav = !isEmbedded && (isControls || isInfo);
-  const showFilmstrip = !isEmbedded && isControls;
-  const showBottomBar = !isEmbedded && (isControls || isInfo);
+  const showTopNavChrome = !isEmbedded;
+  const showBottomBarChrome = !isEmbedded;
+  const showFilmstripChrome = !isEmbedded && filmstrip.length > 0;
+
+  // ✅ Key fix for "photo jumps":
+  // We reserve the SAME top/bottom/filmstrip space in *all* modes, and simply fade chrome in/out.
+  const TOP_H = 64; // top chrome reserve
+  const BOTTOM_H = 88; // bottom pill reserve (safe padding)
+  const STRIP_H = showFilmstripChrome ? 78 : 0; // reserve filmstrip space if it exists
+
+  // Chrome visibility
+  const chromeVisible = !isImmersive;
+  const stripVisible = isControls; // only in controls
 
   return (
     <Outer>
       <div
-  className="h-full w-full flex flex-col"
-  style={{
-    background: bg,
-    transition: `background 220ms ${EASE_IOS}`,
-  }}
->
-  {/* NAV BAR */}
-  {showNav && (
-    <div className="z-[50] px-4 pt-4 pb-2 flex items-center justify-between">
-      <button
-        onClick={onBack}
-        className="w-10 h-10 rounded-[10px] grid place-items-center"
+        className="h-full w-full relative"
         style={{
-          background: "rgba(255,255,255,0.95)",
-          border: "1px solid rgba(0,0,0,0.10)",
+          background: bg,
+          transition: `background 220ms ${EASE_IOS}`,
+          overflow: "hidden",
         }}
       >
-        <ChevronLeft className="w-5 h-5" />
-      </button>
-
-      <div className="flex-1" />
-      <div className="w-10 h-10" />
-    </div>
-  )}
-
-  {/* PHOTO STAGE */}
-  <div
-    className="relative flex-1"
-    onClick={() => !isInfo && handleStageTapToggle()}
-  >
-    <MediaStage
-      isEmbedded={isEmbedded}
-      stageRef={stageRef}
-      media={stageMedia}
-      fit={fitMode}
-      imgZoom={imgZoom}
-      clipBottom={clipBottom}
-      isAddPinMode={isInfo ? isAddPinMode : false}
-      isFocusMode={false}
-      onClickToAddPin={(e) => {
-        if (isInfo && isAddPinMode) {
-          e.stopPropagation();
-          onClickToAddPin(e);
-        }
-      }}
-      hotspots={showPins ? currentHotspots : []}
-      selectedPin={selectedPin}
-      palette={palette}
-      getDisplayXY={getDisplayXY}
-      showPins={showPins}
-      onPinPointerDown={(e, pin) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setSelectedPinId(pin?.id || null);
-      }}
-    />
-  </div>
-
-  {/* FILMSTRIP (now in normal flow, not overlaying) */}
-  {showFilmstrip && filmstrip.length > 0 && (
-    <div className="px-4 pb-3 pt-2">
-      <div className="flex gap-2 overflow-x-auto hide-scrollbar">
-        {filmstrip.map((m) => {
-          const mUrl = resolveMediaUrl(m);
-          const active = m.id === stageMedia?.id;
-
-          return (
-            <button
-              key={m.id}
-              onClick={() => {
-                onSelectMedia?.({ ...m, url: mUrl });
-                if (viewMode === "immersive") setViewMode("controls");
-              }}
-              className="shrink-0"
-            >
-              <div
-                style={{
-                  width: 54,
-                  height: 54,
-                  borderRadius: 12,
-                  overflow: "hidden",
-                  border: active
-                    ? "2px solid rgba(0,0,0,0.85)"
-                    : "1px solid rgba(0,0,0,0.12)",
-                }}
-              >
-                <img
-                  src={m.thumbnailUrl || mUrl}
-                  alt=""
-                  className="w-full h-full object-cover"
-                />
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  )}
-
-  {/* BOTTOM BAR */}
-  {showBottomBar && (
-    <div className="pb-5 flex justify-center">
-      <div
-        className="h-12 px-5 rounded-[999px] flex items-center gap-7"
-        style={{
-          background: "rgba(255,255,255,0.95)",
-          border: "1px solid rgba(0,0,0,0.10)",
-          backdropFilter: "blur(14px)",
-        }}
-      >
-        <button onClick={handleShare}>
-          <Share2 className="w-5 h-5" />
-        </button>
-
-        <button
-          onClick={() =>
-            setViewMode((m) => (m === "info" ? "controls" : "info"))
-          }
+        {/* MAIN STAGE AREA — padding reserved ALWAYS so the photo never reflows/jumps */}
+        <div
+          className="h-full w-full"
           style={{
-            background: isInfo ? "rgba(0,0,0,0.08)" : "transparent",
-            borderRadius: 999,
-            padding: 6,
+            paddingTop: TOP_H,
+            paddingBottom: BOTTOM_H + STRIP_H,
+          }}
+          onClick={() => {
+            if (!isInfo) handleStageTapToggle();
           }}
         >
-          <Info className="w-5 h-5" />
-        </button>
+          <div className="relative w-full h-full">
+            <MediaStage
+              isEmbedded={isEmbedded}
+              stageRef={stageRef}
+              media={stageMedia}
+              fit={fitMode}
+              imgZoom={imgZoom}
+              clipBottom={clipBottom}
+              isAddPinMode={isInfo ? isAddPinMode : false}
+              isFocusMode={false}
+              onClickToAddPin={(e) => {
+                if (isInfo && isAddPinMode) {
+                  e.stopPropagation();
+                  onClickToAddPin(e);
+                }
+              }}
+              hotspots={showPins ? currentHotspots : []}
+              selectedPin={selectedPin}
+              palette={palette}
+              getDisplayXY={getDisplayXY}
+              showPins={showPins}
+              onPinPointerDown={(e, pin) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setSelectedPinId(pin?.id || null);
+              }}
+            />
+          </div>
+        </div>
 
-        <button onClick={handleDelete}>
-          <Trash2 className="w-5 h-5 text-red-600" />
-        </button>
-      </div>
-    </div>
-  )}
-</div>
+        {/* TOP NAV — fades in/out but space is already reserved, so no jump */}
+        {showTopNavChrome && (
+          <div
+            className="absolute top-0 left-0 right-0 z-[300] pointer-events-none"
+            style={{
+              opacity: chromeVisible ? 1 : 0,
+              transform: chromeVisible ? "translateY(0px)" : "translateY(-6px)",
+              transition: `opacity 220ms ${EASE_IOS}, transform 220ms ${EASE_IOS}`,
+              willChange: "opacity, transform",
+            }}
+          >
+            <div className="px-4 pt-4 pb-2 flex items-center justify-between gap-3">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onBack?.();
+                }}
+                className="pointer-events-auto w-10 h-10 rounded-[10px] grid place-items-center"
+                style={{
+                  background: "rgba(255,255,255,0.95)",
+                  border: "1px solid rgba(0,0,0,0.10)",
+                }}
+                aria-label="Back"
+              >
+                <ChevronLeft
+                  className="w-5 h-5"
+                  style={{ color: "rgba(0,0,0,0.82)" }}
+                />
+              </button>
 
-        {/* NOTES SHEET — always mounted; floats up via transform */}
+              <div className="flex-1" />
+              <div className="w-10 h-10" />
+            </div>
+          </div>
+        )}
+
+        {/* FILMSTRIP — positioned inside reserved strip area (NOT over photo), only visible in controls */}
+        {showFilmstripChrome && (
+          <div
+            className="absolute left-0 right-0 z-[290] px-4"
+            style={{
+              bottom: BOTTOM_H + 8,
+              height: STRIP_H,
+              display: "flex",
+              alignItems: "center",
+              pointerEvents: stripVisible ? "auto" : "none",
+              opacity: stripVisible ? 1 : 0,
+              transform: stripVisible ? "translateY(0px)" : "translateY(10px)",
+              transition: `opacity 220ms ${EASE_IOS}, transform 220ms ${EASE_IOS}`,
+              willChange: "opacity, transform",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="w-full flex gap-2 overflow-x-auto hide-scrollbar"
+              style={{ WebkitOverflowScrolling: "touch" }}
+            >
+              {filmstrip.map((m) => {
+                const mUrl = resolveMediaUrl(m);
+                const active = m.id === stageMedia?.id;
+                return (
+                  <button
+                    key={m.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectMedia?.({ ...m, url: mUrl });
+                      // keep current view mode (no forced dark)
+                    }}
+                    className="shrink-0"
+                    style={{ WebkitTapHighlightColor: "transparent" }}
+                    aria-label="Open photo"
+                    title="Open photo"
+                  >
+                    <div
+                      style={{
+                        width: 54,
+                        height: 54,
+                        borderRadius: 12,
+                        overflow: "hidden",
+                        border: active
+                          ? "2px solid rgba(0,0,0,0.85)"
+                          : "1px solid rgba(0,0,0,0.12)",
+                        background: "rgba(0,0,0,0.04)",
+                      }}
+                    >
+                      <img
+                        src={m.thumbnailUrl || mUrl}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        decoding="async"
+                        draggable={false}
+                      />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* BOTTOM BAR — fades in/out but always occupies reserved space so no jump */}
+        {showBottomBarChrome && (
+          <div
+            className="absolute left-0 right-0 bottom-0 z-[300] pb-5 flex justify-center pointer-events-none"
+            style={{
+              opacity: chromeVisible ? 1 : 0,
+              transform: chromeVisible ? "translateY(0px)" : "translateY(10px)",
+              transition: `opacity 220ms ${EASE_IOS}, transform 220ms ${EASE_IOS}`,
+              willChange: "opacity, transform",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="pointer-events-auto h-12 px-5 rounded-[999px] flex items-center gap-7"
+              style={{
+                background: "rgba(255,255,255,0.95)",
+                border: "1px solid rgba(0,0,0,0.10)",
+                backdropFilter: "blur(14px)",
+              }}
+            >
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleShare();
+                }}
+                className="w-9 h-9 grid place-items-center"
+                aria-label="Share"
+              >
+                <Share2
+                  className="w-5 h-5"
+                  style={{ color: "rgba(0,0,0,0.82)" }}
+                />
+              </button>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setViewMode((m) => (m === "info" ? "controls" : "info"));
+                  setIsAddPinMode(false);
+                  setSelectedPinId(null);
+                }}
+                className="w-9 h-9 grid place-items-center rounded-full"
+                aria-label="Info"
+                style={{
+                  background: isInfo ? "rgba(0,0,0,0.08)" : "transparent",
+                }}
+              >
+                <Info
+                  className="w-5 h-5"
+                  style={{ color: "rgba(0,0,0,0.82)" }}
+                />
+              </button>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete();
+                }}
+                className="w-9 h-9 grid place-items-center"
+                aria-label="Delete"
+              >
+                <Trash2
+                  className="w-5 h-5"
+                  style={{ color: "rgba(220,38,38,0.92)" }}
+                />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* NOTES SHEET — absolute overlay; floats up. Kept below top/bottom chrome via z-index. */}
         {!isEmbedded && (
           <div
             onClick={(e) => e.stopPropagation()}
@@ -368,7 +463,7 @@ export default function MediaViewer({
               left: 0,
               right: 0,
               bottom: 0,
-              zIndex: 170,
+              zIndex: 200, // below top/bottom chrome (300), above stage
               background: "#FFFEFA",
               borderTop: "1px solid rgba(0,0,0,0.08)",
               minHeight: "50vh",
@@ -377,6 +472,9 @@ export default function MediaViewer({
               transition: `transform ${INFO_DUR}ms ${EASE_IOS}, opacity 220ms ${EASE_IOS}`,
               willChange: "transform, opacity",
               pointerEvents: isInfo ? "auto" : "none",
+              maxHeight: `calc(100vh - ${TOP_H}px - ${BOTTOM_H}px)`,
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
             }}
           >
             <div className="px-5 pt-4">
