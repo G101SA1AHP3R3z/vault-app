@@ -308,6 +308,7 @@ function VaultShell() {
     // sessions
     addSession,
     renameSession,
+    updateSessionNotes,
     deleteSession,
 
     // media
@@ -381,138 +382,105 @@ function VaultShell() {
           await addMediaToProject(activeProject.id, f, sessionId, sessionTitle);
         }
       }
-      setMediaOpen(false);
-      setAutoPromptMediaPicker(false);
-      setPrefillSessionId(null);
-      setPrefillSessionTitle("");
     } catch (e) {
-      console.error("Media upload failed", e);
-      alert(e?.message || "Upload failed. Check console.");
+      console.error(e);
+      alert(e?.message || "Upload failed.");
     }
+  };
+
+  const goBackFromProject = () => {
+    setView("dashboard");
   };
 
   const openAddPhotosForSession = (session) => {
     setPrefillSessionId(session?.id || null);
-    setPrefillSessionTitle(session?.title || "");
+    setPrefillSessionTitle(session?.title || "Session");
     setAutoPromptMediaPicker(false);
     setMediaOpen(true);
   };
 
-  const openAddSession = () => {
+  const openAddSession = async () => {
     if (!activeProject?.id) return;
-    const title = prompt("New session name", "New Session");
-    if (title == null) return;
-    const clean = title.trim() || "New Session";
-
-    addSession?.(activeProject.id, clean)
-      .then((session) => {
-        if (session?.id) {
-          setPrefillSessionId(session.id);
-          setPrefillSessionTitle(session.title || clean);
-          setAutoPromptMediaPicker(false);
-          setMediaOpen(true);
-        }
-      })
-      .catch((e) => alert(e?.message || "Could not create session."));
+    const s = await addSession(activeProject.id, "New Session");
+    setPrefillSessionId(s?.id || null);
+    setPrefillSessionTitle(s?.title || "New Session");
+    setAutoPromptMediaPicker(false);
+    setMediaOpen(true);
   };
 
-  const goBackFromProject = () => {
-    mediaNav.resetViewer();
-    setView("dashboard");
-    setActiveProject(null);
+  const editProject = async () => {
+    const next = prompt("Project name:", activeProject?.title || "");
+    if (!next) return;
+    try {
+      await renameProject(activeProject.id, next);
+    } catch (e) {
+      alert(e?.message || "Could not rename.");
+    }
   };
 
   const shareProject = async () => {
     if (!activeProject?.id) return;
     try {
-      const inviteId = await createInvite?.(activeProject.id, "editor");
-      if (inviteId) {
-        await navigator.clipboard.writeText(inviteId);
-        alert("Copied invite code to clipboard.");
-        return;
-      }
-    } catch {}
-
-    try {
-      await navigator.clipboard.writeText(activeProject.id);
-      alert("Copied projectId to clipboard.");
-    } catch {
-      prompt("Copy projectId:", activeProject.id);
-    }
-  };
-
-  const editProject = async () => {
-    if (!activeProject?.id) return;
-    const next = prompt("Rename project", activeProject.title || "");
-    if (next == null) return;
-    const title = next.trim();
-    if (!title) return;
-    try {
-      await renameProject?.(activeProject.id, title);
+      const inviteId = await createInvite(activeProject.id, "editor");
+      if (!inviteId) return;
+      const url = `${window.location.origin}/invite/${inviteId}`;
+      await navigator.clipboard.writeText(url);
+      alert("Invite link copied!");
     } catch (e) {
-      alert(e?.message || "Rename failed.");
+      alert(e?.message || "Could not create invite.");
     }
   };
 
   const removeProject = async () => {
     if (!activeProject?.id) return;
-    if (!confirm("Move this project to the Archive?")) return;
-
+    if (!confirm("Archive this project?")) return;
     try {
-      await archiveProject?.(activeProject.id);
-      mediaNav.resetViewer();
-      setActiveProject(null);
+      await archiveProject(activeProject.id);
       setView("dashboard");
       setTab("graveyard");
     } catch (e) {
-      alert(e?.message || "Archive failed.");
-    }
-  };
-
-  const shareSession = async (session) => {
-    if (!activeProject?.id || !session?.id) return;
-    const token = `${activeProject.id}::${session.id}`;
-    try {
-      await navigator.clipboard.writeText(token);
-      alert("Copied session token to clipboard.");
-    } catch {
-      prompt("Copy session token:", token);
+      alert(e?.message || "Could not archive.");
     }
   };
 
   const editSession = async (session) => {
-    if (!activeProject?.id || !session?.id) return;
-    const next = prompt("Rename session", session.title || "");
-    if (next == null) return;
-    const title = next.trim();
-    if (!title) return;
+    const next = prompt("Session title:", session?.title || "");
+    if (!next) return;
     try {
-      await renameSession?.(activeProject.id, session.id, title);
+      await renameSession(activeProject.id, session.id, next);
     } catch (e) {
-      alert(e?.message || "Rename failed.");
+      alert(e?.message || "Could not rename session.");
+    }
+  };
+
+  const shareSession = async (session) => {
+    try {
+      const url = `${window.location.origin}/project/${activeProject.id}?session=${session.id}`;
+      await navigator.clipboard.writeText(url);
+      alert("Session link copied!");
+    } catch (e) {
+      alert(e?.message || "Could not copy link.");
     }
   };
 
   const removeSession = async (session) => {
-    if (!activeProject?.id || !session?.id) return;
-    if (!confirm(`Delete "${session.title}" and all its photos?`)) return;
+    if (!confirm("Delete this session?")) return;
     try {
-      await deleteSession?.(activeProject.id, session.id);
+      await deleteSession(activeProject.id, session.id);
     } catch (e) {
-      alert(e?.message || "Delete failed.");
+      alert(e?.message || "Could not delete session.");
     }
-  };
-
-  const handleDeleteInViewer = async () => {
-    if (!activeProject?.id || !mediaNav.selectedMedia?.id || !mediaNav.selectedMedia?.sessionId) return;
-    if (!confirm("Permanently delete this photo?")) return;
-    await mediaNav.deleteSelectedMedia();
   };
 
   // ---- Project Brief + Session Voice Notes wiring ----
   const handleUpdateProjectBrief = async (text) => {
     if (!activeProject?.id) return;
     await updateProjectBrief?.(activeProject.id, text);
+  };
+
+  const handleUpdateSessionNotes = async (session, text) => {
+    if (!activeProject?.id || !session?.id) return;
+    await updateSessionNotes?.(activeProject.id, session.id, text);
   };
 
   const openVoiceForSession = (session) => {
@@ -522,75 +490,84 @@ function VaultShell() {
 
   const saveVoiceForSession = async ({ file, durationSec }) => {
     if (!activeProject?.id || !voiceSession?.id) return;
-    await uploadSessionVoiceNote?.(activeProject.id, voiceSession.id, file, { durationSec });
+    await uploadSessionVoiceNote(activeProject.id, voiceSession.id, file, durationSec);
   };
 
-  const playSessionVoice = (session) => {
-    const url = session?.voiceNoteUrl;
-    if (!url) return;
+  const playSessionVoice = async (session) => {
+    if (!session?.voiceNoteUrl) return;
     try {
-      const a = new Audio(url);
+      const a = new Audio(session.voiceNoteUrl);
       a.play();
-    } catch (e) {
-      console.error(e);
-      window.open(url, "_blank");
+    } catch {
+      window.open(session.voiceNoteUrl, "_blank");
     }
   };
 
   const editSessionTranscript = async (session) => {
-    if (!activeProject?.id || !session?.id) return;
-    const current = (session?.voiceTranscriptEdited || session?.voiceTranscriptRaw || "").toString();
-    const next = prompt("Edit transcript", current);
+    const initial = session?.voiceTranscriptEdited || session?.voiceTranscriptRaw || "";
+    const next = prompt("Edit transcript:", initial);
     if (next == null) return;
     try {
-      await updateSessionVoiceTranscript?.(activeProject.id, session.id, next);
+      await updateSessionVoiceTranscript(activeProject.id, session.id, {
+        raw: session?.voiceTranscriptRaw || "",
+        edited: next,
+        status: "ready",
+      });
     } catch (e) {
-      alert(e?.message || "Transcript update failed.");
+      alert(e?.message || "Could not update transcript.");
     }
   };
 
   const removeSessionVoice = async (session) => {
-    if (!activeProject?.id || !session?.id) return;
-    if (!confirm("Remove this voice note?")) return;
+    if (!confirm("Remove voice note?")) return;
     try {
-      await clearSessionVoiceNote?.(activeProject.id, session.id);
+      await clearSessionVoiceNote(activeProject.id, session.id);
     } catch (e) {
-      alert(e?.message || "Remove failed.");
+      alert(e?.message || "Could not remove voice note.");
     }
   };
 
-  // ✅ Inject general note from Option-2 cache
+  const handleDeleteInViewer = async () => {
+    const m = mediaNav.selectedMedia;
+    if (!m?.id || !m?.sessionId) return;
+    if (!confirm("Delete this photo?")) return;
+    try {
+      await deleteMediaFromProject(activeProject.id, m.sessionId, m.id);
+      mediaNav.closeViewer();
+    } catch (e) {
+      alert(e?.message || "Could not delete media.");
+    }
+  };
+
   const mediaWithNote = useMemo(() => {
-    if (!mediaNav.selectedMedia) return null;
-    const noteDoc = mediaNotesById?.[mediaNav.selectedMedia.id];
-    const noteText = noteDoc?.text || "";
-    return { ...mediaNav.selectedMedia, note: noteText };
+    const m = mediaNav.selectedMedia;
+    if (!m) return null;
+    const note = mediaNotesById?.[m.id]?.text || "";
+    return { ...m, generalNote: note };
   }, [mediaNav.selectedMedia, mediaNotesById]);
 
   return (
     <AbstractCreamBackdrop>
-      <div className="min-h-screen text-gray-900 flex justify-center items-center antialiased" style={{ fontFamily: bodyFont }}>
-        {view === "dashboard" && <Navigation currentTab={tab} setTab={setTab} />}
+      <div style={{ fontFamily: bodyFont, color: palette.ink }}>
+        <div className="max-w-6xl mx-auto">
+          <div className="relative">
+            <Navigation
+              title={view === "project" ? "" : dashboardTitle}
+              tab={tab}
+              onTabChange={(t) => setTab(t)}
+              onBack={view === "project" ? goBackFromProject : null}
+            />
 
-        <div className={`w-full transition-all duration-300 ease-out flex justify-center ${view === "dashboard" ? "md:pl-64" : ""}`}>
-          <div
-            className="w-full max-w-md min-h-screen relative border-x"
-            style={{
-              background: "rgba(255,254,250,0.96)",
-              borderColor: "rgba(0,0,0,0.08)",
-              boxShadow: "0 18px 48px -44px rgba(0,0,0,0.28)",
-            }}
-          >
             {/* DASHBOARD */}
             {view === "dashboard" && (
-              <div className="transition-all duration-300 ease-out">
+              <div className="pt-24 pb-28">
+                {/* Search bar */}
                 {tab === "search" ? (
-                  <div className="px-6 pt-2">
+                  <div className="px-6">
                     <div
-                      className="mt-3 px-4 py-3"
+                      className="w-full px-4 py-3 rounded-[12px]"
                       style={{
-                        borderRadius: 0,
-                        background: "rgba(255,255,255,0.82)",
+                        background: "rgba(255,255,255,0.70)",
                         border: `1px solid ${palette.line}`,
                       }}
                     >
@@ -645,6 +622,7 @@ function VaultShell() {
                 onShareSession={shareSession}
                 onDeleteSession={removeSession}
                 onUpdateProjectBrief={handleUpdateProjectBrief}
+                onUpdateSessionNotes={handleUpdateSessionNotes}
                 onAddSessionVoiceNote={openVoiceForSession}
                 onPlaySessionVoiceNote={playSessionVoice}
                 onEditSessionVoiceTranscript={editSessionTranscript}

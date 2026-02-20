@@ -1,8 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import MediaStage from "./MediaStage";
-import PinNotesPanel from "./PinNotesPanel";
-import PinEditorModal from "./PinEditorModal";
-import useSwipeNav from "./useSwipeNav";
+
+import MediaStage from "./components/MediaStage";
+import PinNotesPanel from "./components/PinNotesPanel";
+
+// ✅ this one is NOT in features/media — it's in /src/components (per your screenshot)
+import PinEditorModal from "../../components/PinEditorModal";
+
+import useSwipeNav from "./hooks/useSwipeNav";
 
 function clamp01(n) {
   const x = Number(n);
