@@ -9,10 +9,7 @@ import {
   query,
   orderBy,
   where,
-  getDoc,
-  setDoc,
   runTransaction,
-  arrayUnion,
 } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
@@ -20,10 +17,8 @@ import { auth, db, storage } from "../lib/firebase";
 
 const VaultContext = createContext(null);
 
-const formatDateShort = (d = new Date()) =>
-  d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
-
 const safeArray = (v) => (Array.isArray(v) ? v : []);
+const nowSeconds = () => ({ seconds: Math.floor(Date.now() / 1000) });
 
 const uid = () => {
   try {
@@ -33,16 +28,42 @@ const uid = () => {
   }
 };
 
-const mergeProjects = (prev, snap) => {
+// UI-side permission helpers to mirror your rules.
+function isLegacyOwner(userId, project) {
+  return !!userId && project?.createdBy === userId;
+}
+
+function isLegacyCollaborator(userId, project) {
+  return !!userId && Array.isArray(project?.collaborators) && project.collaborators.includes(userId);
+}
+
+function getMyRole(userId, project) {
+  if (!userId || !project) return null;
+  const roles = project.roles || null;
+  if (roles && typeof roles === "object" && roles[userId]) return roles[userId];
+  if (isLegacyOwner(userId, project)) return "owner";
+  if (isLegacyCollaborator(userId, project)) return "editor";
+  return null;
+}
+
+function canEdit(userId, project) {
+  const r = getMyRole(userId, project);
+  return r === "owner" || r === "editor";
+}
+
+function isOwner(userId, project) {
+  return getMyRole(userId, project) === "owner";
+}
+
+function mergeProjects(prev, snap) {
   const map = new Map((prev || []).map((p) => [p.id, p]));
   snap.docs.forEach((d) => map.set(d.id, { id: d.id, ...d.data() }));
   return Array.from(map.values());
-};
+}
 
-const sortProjectsByCreatedAt = (list) =>
-  (list || [])
-    .slice()
-    .sort((a, b) => (b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0));
+function sortProjectsByCreatedAt(list) {
+  return (list || []).slice().sort((a, b) => (b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0));
+}
 
 export function VaultProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -90,17 +111,13 @@ export function VaultProvider({ children }) {
 
     const unsubA = onSnapshot(
       qMembers,
-      (snapshot) => {
-        setProjects((prev) => sortProjectsByCreatedAt(mergeProjects(prev, snapshot)));
-      },
+      (snapshot) => setProjects((prev) => sortProjectsByCreatedAt(mergeProjects(prev, snapshot))),
       (err) => console.error("Projects members listener error:", err)
     );
 
     const unsubB = onSnapshot(
       qLegacy,
-      (snapshot) => {
-        setProjects((prev) => sortProjectsByCreatedAt(mergeProjects(prev, snapshot)));
-      },
+      (snapshot) => setProjects((prev) => sortProjectsByCreatedAt(mergeProjects(prev, snapshot))),
       (err) => console.error("Projects legacy listener error:", err)
     );
 
@@ -113,7 +130,6 @@ export function VaultProvider({ children }) {
   // Keep activeProject in sync
   useEffect(() => {
     if (!activeProject?.id) return;
-
     const updated = projects.find((p) => p.id === activeProject.id);
     if (updated) {
       setActiveProject(updated);
@@ -126,30 +142,14 @@ export function VaultProvider({ children }) {
   }, [projects]);
 
   // -----------------------------
-  // Permissions helpers (UI-side)
+  // Local patch helper
   // -----------------------------
-  const isLegacyOwner = (project) => !!user?.uid && project?.createdBy === user.uid;
-  const isLegacyCollaborator = (project) =>
-    !!user?.uid && Array.isArray(project?.collaborators) && project.collaborators.includes(user.uid);
-
-  const getMyRole = (project) => {
-    const me = user?.uid;
-    if (!me || !project) return null;
-
-    const roles = project.roles || null;
-    if (roles && typeof roles === "object" && roles[me]) return roles[me];
-
-    if (isLegacyOwner(project)) return "owner";
-    if (isLegacyCollaborator(project)) return "editor";
-    return null;
+  const applyProjectPatchLocal = (projectId, patch) => {
+    setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, ...patch } : p)));
+    if (activeProject?.id === projectId) {
+      setActiveProject((p) => (p ? { ...p, ...patch } : p));
+    }
   };
-
-  const canEdit = (project) => {
-    const r = getMyRole(project);
-    return r === "owner" || r === "editor";
-  };
-
-  const isOwner = (project) => getMyRole(project) === "owner";
 
   // -----------------------------
   // Projects
@@ -160,8 +160,10 @@ export function VaultProvider({ children }) {
     const newProject = {
       title: title || "Untitled Project",
       aiTags: safeArray(aiTags),
-      // keep legacy field name you were using:
+
+      // legacy
       overallAudio: note,
+
       status: "active",
       createdAt: serverTimestamp(),
       createdBy: user.uid,
@@ -173,172 +175,53 @@ export function VaultProvider({ children }) {
       expiresIn: "30 Days",
       coverPhoto: "",
 
-      // NEW: overview audio + transcript
-      overviewAudioUrl: "",
-      overviewAudioPath: "",
-      overviewAudioCreatedAt: null,
-      overviewTranscriptRaw: "",
-      overviewTranscriptEdited: "",
-      overviewTranscriptUpdatedAt: null,
-      overviewTranscriptStatus: "none", // none | ready | processing | error
+      // NEW: simple project brief (text-first)
+      briefText: "",
+      briefUpdatedAt: null,
     };
 
     const docRef = await addDoc(collection(db, "projects"), newProject);
     return { id: docRef.id, ...newProject };
   };
 
-  const applyProjectPatchLocal = (projectId, patch) => {
-    setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, ...patch } : p)));
-    if (activeProject?.id === projectId) {
-      setActiveProject((p) => (p ? { ...p, ...patch } : p));
-    }
-  };
-
-  // -----------------------------
-  // Project overview audio + transcript
-  // -----------------------------
-  const uploadProjectOverviewAudio = async (projectId, file, transcriptRaw = "") => {
-    if (!user?.uid || !projectId || !file) return;
-
-    const proj = projects.find((p) => p.id === projectId) || activeProject;
-    if (proj && !canEdit(proj)) {
-      throw new Error("You don’t have edit access to this project.");
-    }
-
-    const safeName = (file.name || "overview").replace(/[^\w.-]+/g, "_");
-    const storagePath = `projects/${projectId}/overview/${Date.now()}_${uid()}_${safeName}`;
-    const fileRef = storageRef(storage, storagePath);
-
-    await uploadBytes(fileRef, file, {
-      contentType: file?.type || "application/octet-stream",
-    });
-
-    const url = await getDownloadURL(fileRef);
-
-    // If a previous overview exists, delete the old object best-effort.
-    // (We store path in doc; safe to ignore errors if missing.)
-    const projectRef = doc(db, "projects", projectId);
-    const snap = await getDoc(projectRef);
-    let oldPath = "";
-    if (snap.exists()) {
-      oldPath = snap.data()?.overviewAudioPath || "";
-    }
-
-    const patch = {
-      overviewAudioUrl: url,
-      overviewAudioPath: storagePath,
-      overviewAudioCreatedAt: serverTimestamp(),
-      overviewTranscriptRaw: (transcriptRaw || "").trim(),
-      overviewTranscriptEdited: (transcriptRaw || "").trim(),
-      overviewTranscriptUpdatedAt: transcriptRaw ? serverTimestamp() : null,
-      overviewTranscriptStatus: transcriptRaw ? "ready" : "processing",
-    };
-
-    await updateDoc(projectRef, patch);
-
-    // optimistic
-    applyProjectPatchLocal(projectId, {
-      ...patch,
-      // give local-ish placeholders so UI updates instantly
-      overviewAudioCreatedAt: { seconds: Math.floor(Date.now() / 1000) },
-      overviewTranscriptUpdatedAt: transcriptRaw ? { seconds: Math.floor(Date.now() / 1000) } : null,
-    });
-
-    // delete old file best-effort (don’t block UX)
-    if (oldPath && oldPath !== storagePath) {
-      try {
-        await deleteObject(storageRef(storage, oldPath));
-      } catch {
-        // ignore
-      }
-    }
-
-    return { url, path: storagePath };
-  };
-
-  const updateProjectOverviewTranscript = async (projectId, editedText) => {
+  const renameProject = async (projectId, nextTitle) => {
     if (!user?.uid || !projectId) return;
+    const title = (nextTitle || "").trim();
+    if (!title) throw new Error("Project title can’t be empty.");
 
     const proj = projects.find((p) => p.id === projectId) || activeProject;
-    if (proj && !canEdit(proj)) {
-      throw new Error("You don’t have edit access to this project.");
-    }
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
 
-    const text = (editedText || "").trim();
+    await updateDoc(doc(db, "projects", projectId), { title });
+    applyProjectPatchLocal(projectId, { title });
+  };
 
+  const updateProjectBrief = async (projectId, briefText) => {
+    if (!user?.uid || !projectId) return;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+
+    const text = (briefText || "").trim();
     const patch = {
-      overviewTranscriptEdited: text,
-      overviewTranscriptUpdatedAt: serverTimestamp(),
-      overviewTranscriptStatus: "ready",
+      briefText: text,
+      briefUpdatedAt: serverTimestamp(),
     };
 
     await updateDoc(doc(db, "projects", projectId), patch);
-
-    applyProjectPatchLocal(projectId, {
-      ...patch,
-      overviewTranscriptUpdatedAt: { seconds: Math.floor(Date.now() / 1000) },
-    });
+    applyProjectPatchLocal(projectId, { ...patch, briefUpdatedAt: nowSeconds() });
   };
 
-  const clearProjectOverviewAudio = async (projectId) => {
+  const archiveProject = async (projectId) => {
     if (!user?.uid || !projectId) return;
-
     const proj = projects.find((p) => p.id === projectId) || activeProject;
-    if (proj && !canEdit(proj)) {
-      throw new Error("You don’t have edit access to this project.");
-    }
+    if (proj && !isOwner(user.uid, proj)) throw new Error("Only the owner can archive this project.");
 
-    const projectRef = doc(db, "projects", projectId);
-    const snap = await getDoc(projectRef);
-    if (!snap.exists()) return;
-
-    const oldPath = snap.data()?.overviewAudioPath || "";
-
-    const patch = {
-      overviewAudioUrl: "",
-      overviewAudioPath: "",
-      overviewAudioCreatedAt: null,
-      overviewTranscriptRaw: "",
-      overviewTranscriptEdited: "",
-      overviewTranscriptUpdatedAt: null,
-      overviewTranscriptStatus: "none",
-    };
-
-    await updateDoc(projectRef, patch);
-    applyProjectPatchLocal(projectId, patch);
-
-    if (oldPath) {
-      try {
-        await deleteObject(storageRef(storage, oldPath));
-      } catch {
-        // ignore
-      }
-    }
-  };
-
-  // -----------------------------
-  // Existing functions (unchanged)
-  // -----------------------------
-  const deleteProject = async (projectId) => {
-    if (!user?.uid || !projectId) return;
-
-    const proj = projects.find((p) => p.id === projectId) || activeProject;
-    if (proj && !isOwner(proj)) {
-      throw new Error("Only the owner can delete this project.");
-    }
-
-    const projectRef = doc(db, "projects", projectId);
-    await updateDoc(projectRef, {
+    await updateDoc(doc(db, "projects", projectId), {
       status: "graveyard",
-      deletedAt: serverTimestamp(),
       archivedAt: serverTimestamp(),
     });
 
-    applyProjectPatchLocal(projectId, {
-      status: "graveyard",
-      deletedAt: { seconds: Math.floor(Date.now() / 1000) },
-      archivedAt: { seconds: Math.floor(Date.now() / 1000) },
-    });
+    applyProjectPatchLocal(projectId, { status: "graveyard", archivedAt: nowSeconds() });
 
     if (activeProject?.id === projectId) {
       setActiveProject(null);
@@ -348,23 +231,22 @@ export function VaultProvider({ children }) {
     }
   };
 
-  const archiveProject = async (projectId) => {
+  const deleteProject = async (projectId) => {
+    // Soft delete (graveyard)
     if (!user?.uid || !projectId) return;
-
     const proj = projects.find((p) => p.id === projectId) || activeProject;
-    if (proj && !isOwner(proj)) {
-      throw new Error("Only the owner can archive this project.");
-    }
+    if (proj && !isOwner(user.uid, proj)) throw new Error("Only the owner can delete this project.");
 
-    const projectRef = doc(db, "projects", projectId);
-    await updateDoc(projectRef, {
+    await updateDoc(doc(db, "projects", projectId), {
       status: "graveyard",
+      deletedAt: serverTimestamp(),
       archivedAt: serverTimestamp(),
     });
 
     applyProjectPatchLocal(projectId, {
       status: "graveyard",
-      archivedAt: { seconds: Math.floor(Date.now() / 1000) },
+      deletedAt: nowSeconds(),
+      archivedAt: nowSeconds(),
     });
 
     if (activeProject?.id === projectId) {
@@ -377,46 +259,444 @@ export function VaultProvider({ children }) {
 
   const restoreProject = async (projectId) => {
     if (!user?.uid || !projectId) return;
-
     const proj = projects.find((p) => p.id === projectId) || activeProject;
-    if (proj && !isOwner(proj)) {
-      throw new Error("Only the owner can restore this project.");
-    }
+    if (proj && !isOwner(user.uid, proj)) throw new Error("Only the owner can restore this project.");
 
-    const projectRef = doc(db, "projects", projectId);
-    await updateDoc(projectRef, {
+    await updateDoc(doc(db, "projects", projectId), {
       status: "active",
       restoredAt: serverTimestamp(),
     });
+    applyProjectPatchLocal(projectId, { status: "active", restoredAt: nowSeconds() });
+  };
 
-    applyProjectPatchLocal(projectId, {
+  // -----------------------------
+  // Invites (simple share codes)
+  // -----------------------------
+  const createInvite = async (projectId, role = "editor") => {
+    if (!user?.uid || !projectId) return null;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !isOwner(user.uid, proj)) throw new Error("Only the owner can create an invite.");
+
+    const invite = {
+      projectId,
+      role: role === "owner" ? "editor" : role,
+      createdBy: user.uid,
+      createdAt: serverTimestamp(),
       status: "active",
-      restoredAt: { seconds: Math.floor(Date.now() / 1000) },
+    };
+
+    const ref = await addDoc(collection(db, "invites"), invite);
+    return ref.id;
+  };
+
+  // -----------------------------
+  // Sessions
+  // -----------------------------
+  const addSession = async (projectId, title = "New Session") => {
+    if (!user?.uid || !projectId) return null;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+
+    const session = {
+      id: uid(),
+      title: (title || "Session").trim() || "Session",
+      createdAt: nowSeconds(),
+      media: [],
+
+      // NEW: session voice note (optional)
+      voiceNoteUrl: "",
+      voiceNotePath: "",
+      voiceNoteCreatedAt: null,
+      voiceNoteDurationSec: null,
+      voiceTranscriptRaw: "",
+      voiceTranscriptEdited: "",
+      voiceTranscriptUpdatedAt: null,
+      voiceTranscriptStatus: "none", // none | processing | ready | error
+    };
+
+    const projectRef = doc(db, "projects", projectId);
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists()) throw new Error("Project not found.");
+      const data = snap.data();
+      const sessions = safeArray(data.sessions).slice();
+      sessions.push(session);
+      tx.update(projectRef, { sessions });
+    });
+
+    return session;
+  };
+
+  const renameSession = async (projectId, sessionId, nextTitle) => {
+    if (!user?.uid || !projectId || !sessionId) return;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+    const title = (nextTitle || "").trim();
+    if (!title) throw new Error("Session title can’t be empty.");
+
+    const projectRef = doc(db, "projects", projectId);
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists()) throw new Error("Project not found.");
+      const data = snap.data();
+      const sessions = safeArray(data.sessions).map((s) => ({ ...s }));
+      const idx = sessions.findIndex((s) => s?.id === sessionId);
+      if (idx < 0) throw new Error("Session not found.");
+      sessions[idx].title = title;
+      tx.update(projectRef, { sessions });
     });
   };
 
-  const renameProject = async (projectId, nextTitle) => {
-    if (!user?.uid || !projectId) return;
-
-    const title = (nextTitle || "").trim();
-    if (!title) throw new Error("Project title can’t be empty.");
-
+  const deleteSession = async (projectId, sessionId) => {
+    if (!user?.uid || !projectId || !sessionId) return;
     const proj = projects.find((p) => p.id === projectId) || activeProject;
-    if (proj && !canEdit(proj)) {
-      throw new Error("You don’t have edit access to this project.");
-    }
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
 
-    const ref = doc(db, "projects", projectId);
-    await updateDoc(ref, { title });
-
-    setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, title } : p)));
-    if (activeProject?.id === projectId) setActiveProject((p) => (p ? { ...p, title } : p));
+    const projectRef = doc(db, "projects", projectId);
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists()) throw new Error("Project not found.");
+      const data = snap.data();
+      const sessions = safeArray(data.sessions).filter((s) => s?.id !== sessionId);
+      tx.update(projectRef, { sessions });
+    });
   };
 
-  // NOTE: keep the rest of your existing media/session/hotspot functions as-is.
-  // (I’m not pasting them again here to avoid breaking your file.)
-  // If you need this file to be *exactly* your local one, paste this version
-  // over your current VaultContext.jsx and then re-add your existing functions below renameProject.
+  // -----------------------------
+  // Media (photos/videos)
+  // -----------------------------
+  const addMediaToProject = async (projectId, file, sessionId = null, sessionTitle = "") => {
+    if (!user?.uid || !file || !projectId) return;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+
+    const safeName = (file.name || "upload").replace(/[^\w.-]+/g, "_");
+    const storagePath = `projects/${projectId}/${Date.now()}_${uid()}_${safeName}`;
+    const fileRef = storageRef(storage, storagePath);
+
+    await uploadBytes(fileRef, file, { contentType: file?.type || "application/octet-stream" });
+    const url = await getDownloadURL(fileRef);
+    const kind = (file?.type || "").startsWith("video/") ? "video" : "image";
+
+    const mediaItem = {
+      id: uid(),
+      url,
+      path: storagePath,
+      type: kind,
+      createdAt: nowSeconds(),
+      hotspots: [],
+    };
+
+    const projectRef = doc(db, "projects", projectId);
+
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists()) throw new Error("Project not found.");
+      const data = snap.data();
+      const sessions = safeArray(data.sessions).map((s) => ({ ...s }));
+
+      let sid = sessionId;
+      if (!sid) {
+        if (sessions.length) {
+          sid = sessions[0].id;
+        } else {
+          const first = {
+            id: uid(),
+            title: (sessionTitle || "First Fitting").trim() || "First Fitting",
+            createdAt: nowSeconds(),
+            media: [],
+            voiceNoteUrl: "",
+            voiceNotePath: "",
+            voiceNoteCreatedAt: null,
+            voiceNoteDurationSec: null,
+            voiceTranscriptRaw: "",
+            voiceTranscriptEdited: "",
+            voiceTranscriptUpdatedAt: null,
+            voiceTranscriptStatus: "none",
+          };
+          sessions.push(first);
+          sid = first.id;
+        }
+      }
+
+      const idx = sessions.findIndex((s) => s?.id === sid);
+      if (idx < 0) {
+        const created = {
+          id: sid,
+          title: (sessionTitle || "Session").trim() || "Session",
+          createdAt: nowSeconds(),
+          media: [],
+          voiceNoteUrl: "",
+          voiceNotePath: "",
+          voiceNoteCreatedAt: null,
+          voiceNoteDurationSec: null,
+          voiceTranscriptRaw: "",
+          voiceTranscriptEdited: "",
+          voiceTranscriptUpdatedAt: null,
+          voiceTranscriptStatus: "none",
+        };
+        sessions.push(created);
+      }
+
+      const idx2 = sessions.findIndex((s) => s?.id === sid);
+      const s = sessions[idx2];
+      const media = safeArray(s.media).slice();
+      media.push(mediaItem);
+      sessions[idx2] = { ...s, media };
+
+      const patch = { sessions };
+      if (!data.coverPhoto && kind === "image") patch.coverPhoto = url;
+      tx.update(projectRef, patch);
+    });
+
+    return mediaItem;
+  };
+
+  const addMediaFilesToProject = async (projectId, files = [], sessionId = null, sessionTitle = "") => {
+    const list = safeArray(files).slice(0, 5);
+    for (const f of list) {
+      // eslint-disable-next-line no-await-in-loop
+      await addMediaToProject(projectId, f, sessionId, sessionTitle);
+    }
+  };
+
+  const deleteMediaFromProject = async (projectId, sessionId, mediaId) => {
+    if (!user?.uid || !projectId || !sessionId || !mediaId) return;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+
+    const projectRef = doc(db, "projects", projectId);
+    let removedPath = "";
+
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists()) throw new Error("Project not found.");
+      const data = snap.data();
+      const sessions = safeArray(data.sessions).map((s) => ({ ...s }));
+      const sidx = sessions.findIndex((s) => s?.id === sessionId);
+      if (sidx < 0) throw new Error("Session not found.");
+      const media = safeArray(sessions[sidx].media).slice();
+      const midx = media.findIndex((m) => m?.id === mediaId);
+      if (midx < 0) throw new Error("Media not found.");
+      removedPath = media[midx]?.path || "";
+      media.splice(midx, 1);
+      sessions[sidx] = { ...sessions[sidx], media };
+      tx.update(projectRef, { sessions });
+    });
+
+    if (removedPath) {
+      try {
+        await deleteObject(storageRef(storage, removedPath));
+      } catch {}
+    }
+  };
+
+  // -----------------------------
+  // Pins / Hotspots
+  // -----------------------------
+  const addHotspotToMedia = async (projectId, sessionId, mediaId, hotspot) => {
+    if (!user?.uid || !projectId || !sessionId || !mediaId) return;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+
+    const h = {
+      id: hotspot?.id || uid(),
+      x: Number(hotspot?.x ?? 0.5),
+      y: Number(hotspot?.y ?? 0.5),
+      note: (hotspot?.note || "").toString(),
+      createdAt: nowSeconds(),
+    };
+
+    const projectRef = doc(db, "projects", projectId);
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists()) throw new Error("Project not found.");
+      const data = snap.data();
+      const sessions = safeArray(data.sessions).map((s) => ({ ...s }));
+      const sidx = sessions.findIndex((s) => s?.id === sessionId);
+      if (sidx < 0) throw new Error("Session not found.");
+      const media = safeArray(sessions[sidx].media).map((m) => ({ ...m }));
+      const midx = media.findIndex((m) => m?.id === mediaId);
+      if (midx < 0) throw new Error("Media not found.");
+      const hotspots = safeArray(media[midx].hotspots).slice();
+      hotspots.push(h);
+      media[midx].hotspots = hotspots;
+      sessions[sidx].media = media;
+      tx.update(projectRef, { sessions });
+    });
+
+    return h;
+  };
+
+  const updateHotspotInMedia = async (projectId, sessionId, mediaId, hotspotId, patch = {}) => {
+    if (!user?.uid || !projectId || !sessionId || !mediaId || !hotspotId) return;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+
+    const projectRef = doc(db, "projects", projectId);
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists()) throw new Error("Project not found.");
+      const data = snap.data();
+      const sessions = safeArray(data.sessions).map((s) => ({ ...s }));
+      const sidx = sessions.findIndex((s) => s?.id === sessionId);
+      if (sidx < 0) throw new Error("Session not found.");
+      const media = safeArray(sessions[sidx].media).map((m) => ({ ...m }));
+      const midx = media.findIndex((m) => m?.id === mediaId);
+      if (midx < 0) throw new Error("Media not found.");
+      const hotspots = safeArray(media[midx].hotspots).map((h) => ({ ...h }));
+      const hidx = hotspots.findIndex((h) => h?.id === hotspotId);
+      if (hidx < 0) throw new Error("Pin not found.");
+      hotspots[hidx] = { ...hotspots[hidx], ...patch };
+      media[midx].hotspots = hotspots;
+      sessions[sidx].media = media;
+      tx.update(projectRef, { sessions });
+    });
+  };
+
+  const deleteHotspotFromMedia = async (projectId, sessionId, mediaId, hotspotId) => {
+    if (!user?.uid || !projectId || !sessionId || !mediaId || !hotspotId) return;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+
+    const projectRef = doc(db, "projects", projectId);
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists()) throw new Error("Project not found.");
+      const data = snap.data();
+      const sessions = safeArray(data.sessions).map((s) => ({ ...s }));
+      const sidx = sessions.findIndex((s) => s?.id === sessionId);
+      if (sidx < 0) throw new Error("Session not found.");
+      const media = safeArray(sessions[sidx].media).map((m) => ({ ...m }));
+      const midx = media.findIndex((m) => m?.id === mediaId);
+      if (midx < 0) throw new Error("Media not found.");
+      const hotspots = safeArray(media[midx].hotspots).filter((h) => h?.id !== hotspotId);
+      media[midx].hotspots = hotspots;
+      sessions[sidx].media = media;
+      tx.update(projectRef, { sessions });
+    });
+  };
+
+  // -----------------------------
+  // Session voice notes (optional)
+  // -----------------------------
+  const uploadSessionVoiceNote = async (projectId, sessionId, file, meta = {}) => {
+    if (!user?.uid || !projectId || !sessionId || !file) return;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+
+    const safeName = (file.name || "voice").replace(/[^\w.-]+/g, "_");
+    const storagePath = `projects/${projectId}/sessions/${sessionId}/voice/${Date.now()}_${uid()}_${safeName}`;
+    const fileRef = storageRef(storage, storagePath);
+
+    await uploadBytes(fileRef, file, { contentType: file?.type || "application/octet-stream" });
+    const url = await getDownloadURL(fileRef);
+
+    const transcriptRaw = (meta?.transcriptRaw || "").trim();
+    const durationSec =
+      typeof meta?.durationSec === "number" && Number.isFinite(meta.durationSec) ? meta.durationSec : null;
+
+    const projectRef = doc(db, "projects", projectId);
+    let oldPath = "";
+
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists()) throw new Error("Project not found.");
+      const data = snap.data();
+      const sessions = safeArray(data.sessions).map((s) => ({ ...s }));
+      const sidx = sessions.findIndex((s) => s?.id === sessionId);
+      if (sidx < 0) throw new Error("Session not found.");
+
+      oldPath = sessions[sidx]?.voiceNotePath || "";
+
+      sessions[sidx] = {
+        ...sessions[sidx],
+        voiceNoteUrl: url,
+        voiceNotePath: storagePath,
+        voiceNoteCreatedAt: nowSeconds(),
+        voiceNoteDurationSec: durationSec,
+        voiceTranscriptRaw: transcriptRaw,
+        voiceTranscriptEdited: transcriptRaw,
+        voiceTranscriptUpdatedAt: transcriptRaw ? nowSeconds() : null,
+        voiceTranscriptStatus: transcriptRaw ? "ready" : "processing",
+      };
+
+      tx.update(projectRef, { sessions });
+    });
+
+    if (oldPath && oldPath !== storagePath) {
+      try {
+        await deleteObject(storageRef(storage, oldPath));
+      } catch {}
+    }
+
+    return { url, path: storagePath };
+  };
+
+  const updateSessionVoiceTranscript = async (projectId, sessionId, editedText) => {
+    if (!user?.uid || !projectId || !sessionId) return;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+
+    const text = (editedText || "").trim();
+    const projectRef = doc(db, "projects", projectId);
+
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists()) throw new Error("Project not found.");
+      const data = snap.data();
+      const sessions = safeArray(data.sessions).map((s) => ({ ...s }));
+      const sidx = sessions.findIndex((s) => s?.id === sessionId);
+      if (sidx < 0) throw new Error("Session not found.");
+      sessions[sidx] = {
+        ...sessions[sidx],
+        voiceTranscriptEdited: text,
+        voiceTranscriptUpdatedAt: nowSeconds(),
+        voiceTranscriptStatus: "ready",
+      };
+      tx.update(projectRef, { sessions });
+    });
+  };
+
+  const clearSessionVoiceNote = async (projectId, sessionId) => {
+    if (!user?.uid || !projectId || !sessionId) return;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+
+    const projectRef = doc(db, "projects", projectId);
+    let oldPath = "";
+
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists()) throw new Error("Project not found.");
+      const data = snap.data();
+      const sessions = safeArray(data.sessions).map((s) => ({ ...s }));
+      const sidx = sessions.findIndex((s) => s?.id === sessionId);
+      if (sidx < 0) throw new Error("Session not found.");
+
+      oldPath = sessions[sidx]?.voiceNotePath || "";
+
+      sessions[sidx] = {
+        ...sessions[sidx],
+        voiceNoteUrl: "",
+        voiceNotePath: "",
+        voiceNoteCreatedAt: null,
+        voiceNoteDurationSec: null,
+        voiceTranscriptRaw: "",
+        voiceTranscriptEdited: "",
+        voiceTranscriptUpdatedAt: null,
+        voiceTranscriptStatus: "none",
+      };
+
+      tx.update(projectRef, { sessions });
+    });
+
+    if (oldPath) {
+      try {
+        await deleteObject(storageRef(storage, oldPath));
+      } catch {}
+    }
+  };
 
   // -----------------------------
   // Auth actions
@@ -472,21 +752,43 @@ export function VaultProvider({ children }) {
     setSearch,
     filteredProjects,
 
-    getMyRole,
-    canEdit,
-    isOwner,
+    // permissions
+    getMyRole: (project) => getMyRole(user?.uid, project),
+    canEdit: (project) => canEdit(user?.uid, project),
+    isOwner: (project) => isOwner(user?.uid, project),
 
+    // projects
     addProject,
     renameProject,
+    updateProjectBrief,
     deleteProject,
     archiveProject,
     restoreProject,
 
-    // NEW: overview audio + transcript
-    uploadProjectOverviewAudio,
-    updateProjectOverviewTranscript,
-    clearProjectOverviewAudio,
+    // invites
+    createInvite,
 
+    // sessions
+    addSession,
+    renameSession,
+    deleteSession,
+
+    // media
+    addMediaFilesToProject,
+    addMediaToProject,
+    deleteMediaFromProject,
+
+    // pins
+    addHotspotToMedia,
+    updateHotspotInMedia,
+    deleteHotspotFromMedia,
+
+    // session voice notes
+    uploadSessionVoiceNote,
+    updateSessionVoiceTranscript,
+    clearSessionVoiceNote,
+
+    // auth
     signOutUser,
   };
 
