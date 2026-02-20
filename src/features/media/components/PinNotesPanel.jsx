@@ -10,17 +10,9 @@ function safeText(v) {
   return (v == null ? "" : String(v)).trim();
 }
 
-/**
- * Photo work surface
- * - Notes: general notes for the whole photo (optional)
- * - Annotations: optional markers (hotspots) on the photo
- *   - UI stays tucked until at least one annotation exists
- *   - Adding an annotation is done via a small + Add menu
- */
 export default function PinNotesPanel({
   headerFont,
   palette,
-
   projectId,
 
   hotspots = [],
@@ -39,8 +31,8 @@ export default function PinNotesPanel({
 }) {
   const accent = palette?.accent || "rgba(255,77,46,0.95)";
   const line = palette?.line || "rgba(0,0,0,0.08)";
+  const ink = palette?.ink || "#0B0B0C";
 
-  // ---- General Notes (per-photo) ----
   const initialNote = useMemo(() => {
     return safeText(media?.note || media?.notes || media?.caption || "");
   }, [media?.note, media?.notes, media?.caption]);
@@ -75,7 +67,6 @@ export default function PinNotesPanel({
     };
   }, []);
 
-  // ---- Annotations (hotspots) ----
   const hasAnyAnnotations = Array.isArray(hotspots) && hotspots.length > 0;
 
   const annotationNotes = useMemo(() => {
@@ -106,18 +97,15 @@ export default function PinNotesPanel({
   }, [addMenuOpen]);
 
   useEffect(() => {
-    // If user is in “tap to place” mode, keep the annotations panel closed.
     if (isAddPinMode) setShowAnnotationsPanel(false);
   }, [isAddPinMode]);
 
   useEffect(() => {
-    // Close tucked panel if annotations disappear (edge case)
     if (!hasAnyAnnotations) setShowAnnotationsPanel(false);
   }, [hasAnyAnnotations]);
 
   return (
     <div className="px-5 pt-4 pb-8">
-      {/* Header row: Notes + small Add */}
       <div className="flex items-center justify-between">
         <div
           className="text-[12px] font-semibold tracking-[0.18em]"
@@ -137,7 +125,6 @@ export default function PinNotesPanel({
             ADD
           </button>
 
-          {/* Add menu */}
           {addMenuOpen && (
             <div className="absolute right-0 mt-2 w-[210px]" style={{ zIndex: 50 }}>
               <div
@@ -185,13 +172,12 @@ export default function PinNotesPanel({
         </div>
       </div>
 
-      {/* Notes box */}
       <div
         className="mt-3"
         style={{
           borderRadius: 8,
           border: `1px solid ${line}`,
-          background: "rgba(255,255,255,0.78)",
+          background: "rgba(255,255,255,0.92)",
         }}
       >
         <textarea
@@ -208,13 +194,11 @@ export default function PinNotesPanel({
           style={{ color: "rgba(0,0,0,0.78)" }}
         />
 
-        {/* Helper line */}
         <div className="px-3 pb-3 text-[11px]" style={{ color: "rgba(0,0,0,0.40)" }}>
           {noteDirty ? "Saving…" : "Optional — you can keep notes without annotations."}
         </div>
       </div>
 
-      {/* Annotation placement hint (only when in add mode) */}
       {isAddPinMode && (
         <div
           className="mt-3 flex items-center justify-between"
@@ -244,7 +228,6 @@ export default function PinNotesPanel({
         </div>
       )}
 
-      {/* Tucked Annotations row (appears only if there are annotations) */}
       {hasAnyAnnotations && !isAddPinMode && (
         <div className="mt-5">
           <button
@@ -264,7 +247,6 @@ export default function PinNotesPanel({
             </div>
           </button>
 
-          {/* chips */}
           <div className="mt-2 flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
             {annotationNotes.all.map((a) => {
               const active = a.id === selectedPin?.id;
@@ -279,9 +261,9 @@ export default function PinNotesPanel({
                     "shrink-0 h-8 px-3 rounded-[8px] text-[12px] font-semibold transition-colors duration-200 ease-out"
                   )}
                   style={{
-                    background: active ? (palette?.sun || "#FFEA3A") : "rgba(255,255,255,0.75)",
-                    color: "rgba(0,0,0,0.78)",
-                    border: `1px solid ${line}`,
+                    background: active ? "rgba(255,77,46,0.14)" : "rgba(255,255,255,0.92)",
+                    color: ink,
+                    border: active ? `1px solid rgba(255,77,46,0.45)` : `1px solid ${line}`,
                   }}
                   aria-label={`Annotation ${a._index}`}
                 >
@@ -291,7 +273,6 @@ export default function PinNotesPanel({
             })}
           </div>
 
-          {/* Panel (tucked details) */}
           {showAnnotationsPanel && (
             <div className="mt-3 space-y-2">
               {annotationNotes.withText.length === 0 ? (
@@ -322,9 +303,7 @@ export default function PinNotesPanel({
                         className="mt-[2px] w-6 h-6 rounded-full grid place-items-center text-[12px] font-semibold"
                         style={{
                           background: "rgba(255,255,255,0.95)",
-                          border: isSelected
-                            ? `2px solid ${palette?.sun || "#FFEA3A"}`
-                            : `1px solid ${line}`,
+                          border: isSelected ? `2px solid ${accent}` : `1px solid ${line}`,
                           color: "rgba(0,0,0,0.70)",
                         }}
                       >
@@ -332,11 +311,7 @@ export default function PinNotesPanel({
                       </div>
 
                       <div className="flex-1 text-[13px] leading-relaxed" style={{ color: "rgba(0,0,0,0.75)" }}>
-                        {a._text ? (
-                          a._text
-                        ) : (
-                          <span style={{ color: "rgba(0,0,0,0.35)" }}>No annotation note.</span>
-                        )}
+                        {a._text ? a._text : <span style={{ color: "rgba(0,0,0,0.35)" }}>No annotation note.</span>}
                       </div>
 
                       <button
@@ -364,7 +339,6 @@ export default function PinNotesPanel({
         </div>
       )}
 
-      {/* Session strip */}
       <SessionStrip
         headerFont={headerFont}
         media={media}

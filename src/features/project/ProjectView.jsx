@@ -122,12 +122,15 @@ export default function ProjectView({
   onShareSession,
   onDeleteSession,
 
-  // NEW: brief + session voice notes
+  // brief + session voice notes
   onUpdateProjectBrief,
   onAddSessionVoiceNote,
   onPlaySessionVoiceNote,
   onEditSessionVoiceTranscript,
   onClearSessionVoiceNote,
+
+  // session notes autosave
+  onUpdateSessionNotes,
 }) {
   const [briefEdit, setBriefEdit] = useState(false);
   const [briefDraft, setBriefDraft] = useState("");
@@ -140,6 +143,29 @@ export default function ProjectView({
     const s = Array.isArray(project?.sessions) ? project.sessions : [];
     return s.slice().sort((a, b) => (b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0));
   }, [project?.sessions]);
+
+  // Session notes drafts + debounced autosave
+  const [sessionNoteDrafts, setSessionNoteDrafts] = useState({});
+  const [sessionNoteDirty, setSessionNoteDirty] = useState({});
+  const sessionNoteTimers = useRef({});
+
+  useEffect(() => {
+    const next = {};
+    sessions.forEach((s) => {
+      next[s.id] = (s?.notesText || "").toString();
+    });
+    setSessionNoteDrafts(next);
+    setSessionNoteDirty({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id]);
+
+  useEffect(() => {
+    return () => {
+      try {
+        Object.values(sessionNoteTimers.current || {}).forEach((t) => clearTimeout(t));
+      } catch {}
+    };
+  }, []);
 
   if (!project) return null;
 
@@ -188,56 +214,43 @@ export default function ProjectView({
       {/* Title stack */}
       <div className="mt-7">
         <div
-          className="text-[22px] font-semibold tracking-[0.08em] uppercase"
-          style={{ fontFamily: headerFont, color: "rgba(0,0,0,0.88)" }}
+          className="text-[22px] leading-tight font-semibold"
+          style={{ fontFamily: headerFont, color: "rgba(0,0,0,0.86)" }}
         >
-          {project.title || "Untitled"}
+          {project.title || "Untitled Project"}
         </div>
-        <div className="mt-1 text-[12px]" style={{ color: "rgba(0,0,0,0.35)" }}>
-          {formatShortDate(project.createdAt) || ""}
+        <div className="mt-1 text-[12px]" style={{ color: "rgba(0,0,0,0.42)" }}>
+          {formatShortDate(project.createdAt) ? `Created ${formatShortDate(project.createdAt)}` : ""}
         </div>
       </div>
 
-      {/* Project brief */}
-      <div className="mt-6">
-        <SectionHeader label="PROJECT BRIEF" />
-
+      {/* Brief */}
+      <div className="mt-8">
+        <SectionHeader label="BRIEF" />
         <div
           className="mt-3"
           style={{
-            background: "rgba(0,0,0,0.03)",
-            border: "1px solid rgba(0,0,0,0.06)",
             borderRadius: 8,
+            background: "rgba(255,255,255,0.65)",
+            border: `1px solid ${line}`,
           }}
         >
-          <div className="px-4 pt-4 pb-3 flex items-start justify-between gap-3">
-            <div className="min-w-0">
+          <div className="px-4 py-4 flex items-start gap-3">
+            <div className="min-w-0 flex-1">
               {!briefEdit ? (
-                <div
-                  className="text-[13px] leading-relaxed"
-                  style={{
-                    color: (project?.briefText || "").trim()
-                      ? "rgba(0,0,0,0.78)"
-                      : "rgba(0,0,0,0.45)",
-                  }}
-                >
-                  {(project?.briefText || "").trim() ? (
-                    project.briefText
-                  ) : (
-                    <span>
-                      Add a short brief: goal, constraints, next step.
-                      <span className="block mt-1">(Voice notes live per session.)</span>
-                    </span>
-                  )}
+                <div className="text-[13px] leading-relaxed" style={{ color: "rgba(0,0,0,0.74)" }}>
+                  {(project.briefText || "").trim()
+                    ? project.briefText
+                    : "Add a short brief (optional)…"}
                 </div>
               ) : (
                 <textarea
                   value={briefDraft}
                   onChange={(e) => setBriefDraft(e.target.value)}
-                  className="w-full bg-transparent outline-none text-[13px] leading-relaxed"
                   rows={4}
-                  placeholder="Goal, constraints, what changed last time, next step…"
-                  style={{ color: "rgba(0,0,0,0.80)", resize: "none" }}
+                  className="w-full bg-transparent outline-none resize-none text-[13px] leading-relaxed"
+                  style={{ color: "rgba(0,0,0,0.78)" }}
+                  placeholder="Brief…"
                 />
               )}
             </div>
@@ -245,7 +258,7 @@ export default function ProjectView({
             {!briefEdit ? (
               <button
                 onClick={() => setBriefEdit(true)}
-                className="shrink-0 w-9 h-9 rounded-[8px] inline-flex items-center justify-center"
+                className="w-9 h-9 rounded-[8px] grid place-items-center"
                 style={{
                   background: "rgba(255,255,255,0.85)",
                   border: `1px solid ${line}`,
@@ -399,6 +412,50 @@ export default function ProjectView({
                     </div>
                   </div>
 
+                  {/* Session notes (optional) */}
+                  <div className="mt-3">
+                    <div className="text-[11px] font-semibold tracking-[0.16em]" style={{ color: "rgba(0,0,0,0.42)" }}>
+                      SESSION NOTES
+                    </div>
+                    <div
+                      className="mt-2"
+                      style={{
+                        borderRadius: 8,
+                        border: `1px solid ${line}`,
+                        background: "rgba(255,255,255,0.85)",
+                      }}
+                    >
+                      <textarea
+                        value={sessionNoteDrafts[session.id] ?? (session?.notesText || "")}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setSessionNoteDrafts((m) => ({ ...m, [session.id]: next }));
+                          setSessionNoteDirty((m) => ({ ...m, [session.id]: true }));
+
+                          if (!onUpdateSessionNotes) return;
+                          const prev = sessionNoteTimers.current[session.id];
+                          if (prev) clearTimeout(prev);
+                          sessionNoteTimers.current[session.id] = setTimeout(async () => {
+                            try {
+                              await onUpdateSessionNotes?.(session, next);
+                            } catch (err) {
+                              console.error("Failed to save session notes", err);
+                            } finally {
+                              setSessionNoteDirty((m) => ({ ...m, [session.id]: false }));
+                            }
+                          }, 450);
+                        }}
+                        rows={sessionNoteDrafts[session.id] ? 3 : 2}
+                        placeholder="Optional — progress, decisions, measurements, next steps…"
+                        className="w-full bg-transparent outline-none resize-none px-3 py-3 text-[13px] leading-relaxed"
+                        style={{ color: "rgba(0,0,0,0.78)" }}
+                      />
+                      <div className="px-3 pb-3 text-[11px]" style={{ color: "rgba(0,0,0,0.40)" }}>
+                        {sessionNoteDirty[session.id] ? "Saving…" : "Optional"}
+                      </div>
+                    </div>
+                  </div>
+
                   {hasVoice ? (
                     <button
                       onClick={() => onPlaySessionVoiceNote?.(session)}
@@ -418,17 +475,6 @@ export default function ProjectView({
                     >
                       ADD PHOTOS
                     </button>
-
-                    {!hasVoice ? (
-                      <button
-                        onClick={() => onAddSessionVoiceNote?.(session)}
-                        className="text-[12px] font-semibold"
-                        style={{ color: "rgba(0,0,0,0.55)", WebkitTapHighlightColor: "transparent" }}
-                        title="Add a quick voice note (optional)"
-                      >
-                        + Add voice note
-                      </button>
-                    ) : null}
                   </div>
                 </div>
               );

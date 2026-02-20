@@ -1,12 +1,8 @@
-// /src/features/media/MediaViewer.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import PinEditorModal from "../../components/PinEditorModal";
-
-import useSwipeNav from "./hooks/useSwipeNav";
-import usePinDrag from "./hooks/usePinDrag";
-
-import MediaStage from "./components/MediaStage";
-import PinNotesPanel from "./components/PinNotesPanel";
+import MediaStage from "./MediaStage";
+import PinNotesPanel from "./PinNotesPanel";
+import PinEditorModal from "./PinEditorModal";
+import useSwipeNav from "./useSwipeNav";
 
 function clamp01(n) {
   const x = Number(n);
@@ -15,195 +11,246 @@ function clamp01(n) {
 }
 
 export default function MediaViewer({
-  mode = "modal",
+  mode = "modal", // "modal" | "embedded"
   project,
   media,
   headerFont,
   palette,
+
   mediaIndex = 0,
   mediaCount = 0,
-
   moreFromSession = [],
   onSelectMedia,
 
-  onBack,
   onPrev,
   onNext,
-  onDeleteMedia,
   onSwipeDown,
+  onBack,
+  onDeleteMedia,
 
+  // annotations (hotspots)
   onAddHotspot,
   onUpdateHotspot,
   onDeleteHotspot,
 
-  // Optional: general notes per-photo (non-annotation notes)
-  // Suggested signature:
-  // onUpdateMediaNote(projectId, sessionId, mediaId, text)
+  // Option 2: general photo notes
   onUpdateMediaNote,
 }) {
   const isEmbedded = mode === "embedded";
   const GAP_PX = 16;
 
-  // NOTE: keeping the internal state name to avoid churn across your codebase.
-  // This is “Add annotation” mode now.
-  const [isAddPinMode, setIsAddPinMode] = useState(false);
-  const [isFocusMode, setIsFocusMode] = useState(false);
-  const [selectedPinId, setSelectedPinId] = useState(null);
-
-  const [pinOpen, setPinOpen] = useState(false);
-  const [pinDraft, setPinDraft] = useState({ label: "", note: "" });
-  const [pinTarget, setPinTarget] = useState(null);
-
   const stageRef = useRef(null);
   const carouselRef = useRef(null);
   const trashRef = useRef(null);
 
-  const currentHotspots = Array.isArray(media?.hotspots) ? media.hotspots : [];
+  // Pin editor modal
+  const [pinOpen, setPinOpen] = useState(false);
+  const [pinDraft, setPinDraft] = useState(null);
 
-  const neighbors = useMemo(() => {
-    if (!media?.id || !Array.isArray(moreFromSession) || moreFromSession.length === 0) {
-      return { prevSrc: "", nextSrc: "", canPrev: false, canNext: false };
-    }
-    const idx = moreFromSession.findIndex((m) => m?.id === media.id);
-    if (idx < 0) return { prevSrc: "", nextSrc: "", canPrev: false, canNext: false };
+  // Modes
+  const [isAddPinMode, setIsAddPinMode] = useState(false);
+  const [isFocusMode, setIsFocusMode] = useState(false);
 
-    const prev = idx > 0 ? moreFromSession[idx - 1] : null;
-    const next = idx < moreFromSession.length - 1 ? moreFromSession[idx + 1] : null;
+  // Selected pin + drag
+  const [selectedPinId, setSelectedPinId] = useState(null);
+  const [drag, setDrag] = useState({
+    draggingPinId: null,
+    draggingPin: null,
+    selectedPin: null,
+    isHoveringTrash: false,
+  });
 
-    return {
-      prevSrc: prev?.url || "",
-      nextSrc: next?.url || "",
-      canPrev: Boolean(prev?.url),
-      canNext: Boolean(next?.url),
-    };
-  }, [media?.id, moreFromSession]);
+  // Helpers
+  const currentHotspots = useMemo(() => {
+    return Array.isArray(media?.hotspots) ? media.hotspots : [];
+  }, [media?.hotspots]);
 
-  useEffect(() => {
-    if (!media?.id) return;
-    if (!Array.isArray(moreFromSession) || moreFromSession.length < 2) return;
-
-    const idx = moreFromSession.findIndex((m) => m?.id === media.id);
-    if (idx < 0) return;
-
-    const candidates = [moreFromSession[idx - 1], moreFromSession[idx + 1]]
-      .filter(Boolean)
-      .map((m) => m?.url)
-      .filter(Boolean);
-
-    candidates.forEach((src) => {
-      const img = new Image();
-      img.decoding = "async";
-      img.src = src;
-    });
-  }, [media?.id, moreFromSession]);
+  const selectedPin = useMemo(() => {
+    if (!selectedPinId) return null;
+    return currentHotspots.find((h) => h.id === selectedPinId) || null;
+  }, [selectedPinId, currentHotspots]);
 
   useEffect(() => {
+    // Keep selection in sync when media changes
+    setSelectedPinId(null);
     setIsAddPinMode(false);
     setIsFocusMode(false);
-    setSelectedPinId(null);
+    setDrag({ draggingPinId: null, draggingPin: null, selectedPin: null, isHoveringTrash: false });
   }, [media?.id]);
 
+  // Prev/next image sources for “gap” carousel
+  const prevSrc = useMemo(() => {
+    if (!onPrev) return "";
+    // we don’t have direct prev item object here — parent supplies onPrev/onNext; stage only needs srcs
+    // leaving empty means Stage will show blank on sides; still swipes cleanly.
+    return "";
+  }, [onPrev]);
+
+  const nextSrc = useMemo(() => {
+    if (!onNext) return "";
+    return "";
+  }, [onNext]);
+
+  // Swipe navigator
   const swipe = useSwipeNav({
     enabled: true,
-    isBlocked: isAddPinMode,
-    stageRef,
     carouselRef,
-    canPrev: neighbors.canPrev,
-    canNext: neighbors.canNext,
-    onPrev: () => onPrev?.(),
-    onNext: () => onNext?.(),
-    onSwipeDown,
-  });
-
-  const drag = usePinDrag({
-    projectId: project?.id,
-    mediaId: media?.id,
-    sessionId: media?.sessionId,
-    hotspots: currentHotspots,
     stageRef,
-    trashRef,
-    isFocusMode,
-    isAddPinMode,
-    onUpdateHotspot,
-    onDeleteHotspot,
-    selectedPinId,
-    setSelectedPinId,
+    onPrev,
+    onNext,
+    onSwipeDown,
+    isBlocked: !!drag.draggingPinId,
+    canPrev: mediaIndex > 0,
+    canNext: mediaIndex < mediaCount - 1,
+    gapPx: GAP_PX,
   });
 
-  const openPinEditor = (hotspot) => {
-    if (!hotspot?.id) return;
-    setPinTarget({
-      sessionId: media.sessionId,
-      mediaId: media.id,
-      hotspotId: hotspot.id,
-    });
-    setPinDraft({ label: hotspot.label || "", note: hotspot.note || "" });
+  // Display XY for a hotspot (supports percent coords)
+  const getDisplayXY = (h) => {
+    const x = clamp01(h?.x);
+    const y = clamp01(h?.y);
+    return { x, y };
+  };
+
+  // Pin drag handling
+  const onPinPointerDown = (e, pin) => {
+    if (!pin?.id) return;
+    if (isAddPinMode) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    try {
+      e.currentTarget?.setPointerCapture?.(e.pointerId);
+    } catch {}
+
+    setSelectedPinId(pin.id);
+    setDrag((d) => ({
+      ...d,
+      draggingPinId: pin.id,
+      draggingPin: { ...pin },
+      selectedPin: pin,
+      isHoveringTrash: false,
+    }));
+  };
+
+  const onStagePointerDown = (e) => {
+    swipe.onPointerDown(e);
+  };
+
+  const onStagePointerMove = (e) => {
+    if (drag.draggingPinId && drag.draggingPin) {
+      // Dragging a pin
+      const rect = stageRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+
+      const next = {
+        ...drag.draggingPin,
+        x: clamp01(x),
+        y: clamp01(y),
+      };
+
+      // Trash hover
+      const trashRect = trashRef.current?.getBoundingClientRect();
+      const hoveringTrash =
+        trashRect &&
+        e.clientX >= trashRect.left &&
+        e.clientX <= trashRect.right &&
+        e.clientY >= trashRect.top &&
+        e.clientY <= trashRect.bottom;
+
+      setDrag((d) => ({
+        ...d,
+        draggingPin: next,
+        isHoveringTrash: !!hoveringTrash,
+      }));
+
+      return;
+    }
+
+    swipe.onPointerMove(e);
+  };
+
+  const onStagePointerUp = async (e) => {
+    if (drag.draggingPinId && drag.draggingPin) {
+      // Drop pin
+      const shouldDelete = drag.isHoveringTrash;
+
+      const pinId = drag.draggingPinId;
+      const nextPin = drag.draggingPin;
+
+      setDrag({ draggingPinId: null, draggingPin: null, selectedPin: selectedPin, isHoveringTrash: false });
+
+      try {
+        if (shouldDelete) {
+          await onDeleteHotspot?.(project?.id, media?.sessionId, media?.id, pinId);
+          setSelectedPinId(null);
+        } else {
+          await onUpdateHotspot?.(project?.id, media?.sessionId, media?.id, pinId, {
+            x: nextPin.x,
+            y: nextPin.y,
+          });
+        }
+      } catch (err) {
+        console.error("Pin drop failed", err);
+      }
+
+      return;
+    }
+
+    swipe.onPointerEnd(e);
+  };
+
+  const onStagePointerCancel = (e) => {
+    swipe.onPointerEnd(e);
+  };
+
+  const onClickToAddPin = async (e) => {
+    if (!isAddPinMode || isFocusMode) return;
+    if (!stageRef.current) return;
+
+    const rect = stageRef.current.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+
+    try {
+      await onAddHotspot?.(project?.id, media?.sessionId, media?.id, { x: clamp01(x), y: clamp01(y) });
+      setIsAddPinMode(false);
+    } catch (err) {
+      console.error("Failed to add hotspot", err);
+    }
+  };
+
+  const openPinEditor = (pin) => {
+    if (!pin) return;
+    setPinDraft(pin);
     setPinOpen(true);
   };
 
-  const savePinEdits = async (nextDraft) => {
-    if (!project?.id || !pinTarget) return;
-    try {
-      await onUpdateHotspot?.(project.id, pinTarget.sessionId, pinTarget.mediaId, pinTarget.hotspotId, {
-        label: nextDraft?.label || "",
-        note: nextDraft?.note || "",
-      });
-      setPinOpen(false);
-      setPinTarget(null);
-    } catch (e) {
-      console.error("Failed to update annotation:", e);
-    }
+  const closePinEditor = () => {
+    setPinOpen(false);
+    setPinDraft(null);
   };
 
-  const deletePin = async () => {
-    if (!project?.id || !pinTarget) return;
-    if (!confirm("Delete this annotation?")) return;
+  const savePinEditor = async (nextText) => {
+    if (!pinDraft?.id) return closePinEditor();
     try {
-      await onDeleteHotspot?.(project.id, pinTarget.sessionId, pinTarget.mediaId, pinTarget.hotspotId);
-      setPinOpen(false);
-      setPinTarget(null);
-      setSelectedPinId(null);
-    } catch (e) {
-      console.error("Failed to delete annotation:", e);
-    }
-  };
-
-  const handleStageClickToAddPin = async (e) => {
-    if (!isAddPinMode || isFocusMode) return;
-    if (!project?.id || !media?.id) return;
-    if (!stageRef.current) return;
-
-    try {
-      const rect = stageRef.current.getBoundingClientRect();
-      const clientX = e.clientX ?? e.touches?.[0]?.clientX;
-      const clientY = e.clientY ?? e.touches?.[0]?.clientY;
-      if (clientX == null || clientY == null) return;
-
-      const x = clamp01((clientX - rect.left) / rect.width);
-      const y = clamp01((clientY - rect.top) / rect.height);
-      const newPinId = `h-${Date.now()}`;
-
-      await onAddHotspot?.(project.id, media.sessionId, media.id, {
-        id: newPinId,
-        x,
-        y,
-        label: "",
-        note: "",
-      });
-
-      setIsAddPinMode(false);
-      setSelectedPinId(newPinId);
+      await onUpdateHotspot?.(project?.id, media?.sessionId, media?.id, pinDraft.id, { note: nextText });
     } catch (err) {
-      console.error("Failed to save annotation:", err);
-      alert("Failed to save annotation. Check console.");
+      console.error("Failed to update pin note", err);
+    } finally {
+      closePinEditor();
     }
   };
 
   const Outer = ({ children }) => {
     if (isEmbedded) return <div className="w-full relative">{children}</div>;
-    // Pure white for bright media + less perceived “gray haze”
+    // True white (bright media makes any gray feel dirty)
     return (
-      <div className="fixed inset-0 z-[100]" style={{ background: "#FFFFFF" }}>
+      <div className="fixed inset-0 z-[100]" style={{ background: "#FFFFFF", overscrollBehavior: "contain" }}>
         {children}
       </div>
     );
@@ -211,61 +258,41 @@ export default function MediaViewer({
 
   return (
     <Outer>
-      {/*
-        Keep the viewer itself non-scrollable.
-        Otherwise, vertical scroll steals pointer/touch gestures and causes the
-        “jump / missed swipe” issue on fast swipes.
+      {/* 
+        UX fix: stage + notes scroll together like a normal page.
+        Swipe smoothness is handled by touch-action + preventing default only
+        when we’ve committed to a horizontal swipe.
       */}
-      <div
-        className={
-          isEmbedded ? "w-full h-full relative" : "h-full w-full overflow-hidden relative flex flex-col"
-        }
-      >
+      <div className={isEmbedded ? "w-full h-full relative" : "h-full w-full overflow-y-auto"}>
         <MediaStage
           isEmbedded={isEmbedded}
           stageRef={stageRef}
           carouselRef={carouselRef}
           trashRef={trashRef}
           media={media}
-          prevSrc={neighbors.prevSrc}
-          nextSrc={neighbors.nextSrc}
-          palette={palette}
+          prevSrc={prevSrc}
+          nextSrc={nextSrc}
+          onBack={onBack}
+          onDeleteMedia={onDeleteMedia}
           isAddPinMode={isAddPinMode}
           isFocusMode={isFocusMode}
-          selectedPin={drag.selectedPin}
+          onStagePointerDown={onStagePointerDown}
+          onStagePointerMove={onStagePointerMove}
+          onStagePointerUp={onStagePointerUp}
+          onStagePointerCancel={onStagePointerCancel}
+          onClickToAddPin={onClickToAddPin}
           hotspots={currentHotspots}
+          selectedPin={selectedPin}
+          palette={palette}
           draggingPinId={drag.draggingPinId}
           isHoveringTrash={drag.isHoveringTrash}
-          getDisplayXY={drag.getDisplayXY}
-          onPinPointerDown={drag.onPinPointerDown}
-          onClickToAddPin={handleStageClickToAddPin}
-          onDeleteMedia={onDeleteMedia}
-          onBack={() => {
-            setIsAddPinMode(false);
-            setIsFocusMode(false);
-            setSelectedPinId(null);
-            onBack?.();
-          }}
-          onStagePointerDown={(e) => {
-            swipe.onPointerDown(e);
-          }}
-          onStagePointerMove={(e) => {
-            if (drag.draggingPinId) drag.onStagePointerMove?.(e);
-            else swipe.onPointerMove(e);
-          }}
-          onStagePointerUp={(e) => {
-            if (drag.draggingPinId) drag.onStagePointerUp?.(e);
-            else swipe.onPointerEnd(e);
-          }}
-          onStagePointerCancel={(e) => {
-            if (drag.draggingPinId) drag.onStagePointerUp?.(e);
-            else swipe.onPointerEnd(e);
-          }}
+          getDisplayXY={drag.draggingPinId ? () => getDisplayXY(drag.draggingPin) : getDisplayXY}
+          onPinPointerDown={onPinPointerDown}
           gapPx={GAP_PX}
         />
 
         {!isFocusMode && (
-          <div className={isEmbedded ? "" : "flex-1 overflow-y-auto"} style={{ background: "#FFFFFF" }}>
+          <div style={{ background: "#FFFFFF" }}>
             <PinNotesPanel
               headerFont={headerFont}
               palette={palette}
@@ -283,23 +310,19 @@ export default function MediaViewer({
             />
           </div>
         )}
-      </div>
 
-      {pinOpen && (
-        <PinEditorModal
-          open={pinOpen}
-          initial={pinDraft}
-          headerFont={headerFont}
-          palette={palette}
-          onClose={() => setPinOpen(false)}
-          onSave={async (draft) => {
-            await savePinEdits(draft);
-          }}
-          onDelete={async () => {
-            await deletePin();
-          }}
-        />
-      )}
+        {/* Pin editor modal */}
+        {pinOpen && (
+          <PinEditorModal
+            open={pinOpen}
+            palette={palette}
+            headerFont={headerFont}
+            initialText={pinDraft?.note || ""}
+            onClose={closePinEditor}
+            onSave={savePinEditor}
+          />
+        )}
+      </div>
     </Outer>
   );
 }

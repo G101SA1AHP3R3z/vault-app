@@ -8,10 +8,10 @@ export default function useSwipeNav({
   onSwipeDown,
   isBlocked = false,
   stageRef = null,
-  animationMs = 300, // Slightly longer for a softer spring feel
+  animationMs = 300,
   canPrev = true,
   canNext = true,
-  gapPx = 16, // Catching the gap so we can do the math right
+  gapPx = 16,
 }) {
   const swipeRef = useRef({
     down: false,
@@ -23,15 +23,41 @@ export default function useSwipeNav({
     lastDx: 0,
   });
 
+  const rafRef = useRef({
+    id: 0,
+    x: 0,
+    transition: "none",
+    pending: false,
+  });
+
   const getStageWidth = () => {
     const w = stageRef?.current?.clientWidth;
     return typeof w === "number" && w > 0 ? w : window.innerWidth;
   };
 
   const setTransform = (x, transition = "none") => {
-    if (!carouselRef?.current) return;
-    carouselRef.current.style.transition = transition;
-    carouselRef.current.style.transform = `translate3d(${x}px, 0, 0)`;
+    const el = carouselRef?.current;
+    if (!el) return;
+
+    // Direct set for animated transitions; RAF-throttle for drag updates.
+    if (transition !== "none") {
+      el.style.transition = transition;
+      el.style.transform = `translate3d(${x}px, 0, 0)`;
+      return;
+    }
+
+    rafRef.current.x = x;
+    rafRef.current.transition = transition;
+    if (rafRef.current.pending) return;
+    rafRef.current.pending = true;
+
+    rafRef.current.id = requestAnimationFrame(() => {
+      rafRef.current.pending = false;
+      const el2 = carouselRef?.current;
+      if (!el2) return;
+      el2.style.transition = "none";
+      el2.style.transform = `translate3d(${rafRef.current.x}px, 0, 0)`;
+    });
   };
 
   const reset = () => {
@@ -56,7 +82,7 @@ export default function useSwipeNav({
 
   const onPointerDown = (e) => {
     if (!enabled || isBlocked) return;
-    if (e.target.closest('button') || e.target.closest('[data-noswipe]')) return;
+    if (e.target.closest("button") || e.target.closest("[data-noswipe]")) return;
 
     const x = e.clientX ?? e.touches?.[0]?.clientX;
     const y = e.clientY ?? e.touches?.[0]?.clientY;
@@ -100,6 +126,12 @@ export default function useSwipeNav({
       return;
     }
 
+    // We are committing to horizontal swipe: stop the browser/page scroll.
+    // This is the core fix for “fast swipe turns into vertical jump”.
+    try {
+      e.preventDefault?.();
+    } catch {}
+
     const w = getStageWidth();
     const goingPrev = dx > 0;
     const goingNext = dx < 0;
@@ -116,23 +148,18 @@ export default function useSwipeNav({
   };
 
   const springBack = (fromDx) => {
-    // Softer spring math
     const overshoot = Math.max(-40, Math.min(40, -fromDx * 0.12));
     setTransform(overshoot, `transform ${animationMs * 0.7}ms cubic-bezier(0.25, 1, 0.5, 1)`);
 
     setTimeout(() => {
       setTransform(0, `transform ${animationMs * 0.5}ms ease-out`);
-      setTimeout(() => {
-        reset();
-      }, animationMs * 0.5 + 20);
+      setTimeout(() => reset(), animationMs * 0.5 + 20);
     }, animationMs * 0.7 + 20);
   };
 
   const commitSlide = (dir, w) => {
-    // THE FIX: Travel the full width PLUS the gap to avoid the 16px teleportation jolt
-    const targetX = dir === 1 ? -(w + gapPx) : (w + gapPx);
-    
-    // Smooth ease-out curve so it glides into place instead of slamming into a brick wall
+    // Travel full width PLUS the gap (prevents the “gap snap” jolt)
+    const targetX = dir === 1 ? -(w + gapPx) : w + gapPx;
     setTransform(targetX, `transform ${animationMs}ms cubic-bezier(0.25, 1, 0.45, 1)`);
 
     setTimeout(() => {
