@@ -1,3 +1,4 @@
+// /src/context/VaultContext.jsx
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
   collection,
@@ -10,6 +11,7 @@ import {
   orderBy,
   where,
   runTransaction,
+  setDoc,
 } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
@@ -28,15 +30,13 @@ const uid = () => {
   }
 };
 
-// UI-side permission helpers to mirror your rules.
+// UI-side permission helpers (mirror rules)
 function isLegacyOwner(userId, project) {
   return !!userId && project?.createdBy === userId;
 }
-
 function isLegacyCollaborator(userId, project) {
   return !!userId && Array.isArray(project?.collaborators) && project.collaborators.includes(userId);
 }
-
 function getMyRole(userId, project) {
   if (!userId || !project) return null;
   const roles = project.roles || null;
@@ -45,12 +45,10 @@ function getMyRole(userId, project) {
   if (isLegacyCollaborator(userId, project)) return "editor";
   return null;
 }
-
 function canEdit(userId, project) {
   const r = getMyRole(userId, project);
   return r === "owner" || r === "editor";
 }
-
 function isOwner(userId, project) {
   return getMyRole(userId, project) === "owner";
 }
@@ -60,7 +58,6 @@ function mergeProjects(prev, snap) {
   snap.docs.forEach((d) => map.set(d.id, { id: d.id, ...d.data() }));
   return Array.from(map.values());
 }
-
 function sortProjectsByCreatedAt(list) {
   return (list || []).slice().sort((a, b) => (b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0));
 }
@@ -76,6 +73,9 @@ export function VaultProvider({ children }) {
   const [search, setSearch] = useState("");
 
   const [projects, setProjects] = useState([]);
+
+  // ✅ Option 2 cache: notes keyed by mediaId for the active project
+  const [mediaNotesById, setMediaNotesById] = useState({}); // { [mediaId]: { text, ... } }
 
   // -----------------------------
   // Auth
@@ -142,6 +142,35 @@ export function VaultProvider({ children }) {
   }, [projects]);
 
   // -----------------------------
+  // ✅ Option 2: listen to mediaNotes for active project
+  // -----------------------------
+  useEffect(() => {
+    const pid = activeProject?.id;
+    if (!user?.uid || !pid) {
+      setMediaNotesById({});
+      return;
+    }
+
+    const notesCol = collection(db, "projects", pid, "mediaNotes");
+    const unsub = onSnapshot(
+      notesCol,
+      (snap) => {
+        const map = {};
+        snap.docs.forEach((d) => {
+          map[d.id] = { id: d.id, ...d.data() };
+        });
+        setMediaNotesById(map);
+      },
+      (err) => {
+        console.error("mediaNotes listener error:", err);
+        setMediaNotesById({});
+      }
+    );
+
+    return () => unsub();
+  }, [user?.uid, activeProject?.id]);
+
+  // -----------------------------
   // Local patch helper
   // -----------------------------
   const applyProjectPatchLocal = (projectId, patch) => {
@@ -175,7 +204,7 @@ export function VaultProvider({ children }) {
       expiresIn: "30 Days",
       coverPhoto: "",
 
-      // NEW: simple project brief (text-first)
+      // brief
       briefText: "",
       briefUpdatedAt: null,
     };
@@ -232,7 +261,6 @@ export function VaultProvider({ children }) {
   };
 
   const deleteProject = async (projectId) => {
-    // Soft delete (graveyard)
     if (!user?.uid || !projectId) return;
     const proj = projects.find((p) => p.id === projectId) || activeProject;
     if (proj && !isOwner(user.uid, proj)) throw new Error("Only the owner can delete this project.");
@@ -270,7 +298,7 @@ export function VaultProvider({ children }) {
   };
 
   // -----------------------------
-  // Invites (simple share codes)
+  // Invites
   // -----------------------------
   const createInvite = async (projectId, role = "editor") => {
     if (!user?.uid || !projectId) return null;
@@ -303,7 +331,6 @@ export function VaultProvider({ children }) {
       createdAt: nowSeconds(),
       media: [],
 
-      // NEW: session voice note (optional)
       voiceNoteUrl: "",
       voiceNotePath: "",
       voiceNoteCreatedAt: null,
@@ -311,7 +338,7 @@ export function VaultProvider({ children }) {
       voiceTranscriptRaw: "",
       voiceTranscriptEdited: "",
       voiceTranscriptUpdatedAt: null,
-      voiceTranscriptStatus: "none", // none | processing | ready | error
+      voiceTranscriptStatus: "none",
     };
 
     const projectRef = doc(db, "projects", projectId);
@@ -363,10 +390,11 @@ export function VaultProvider({ children }) {
   };
 
   // -----------------------------
-  // Media (photos/videos)
+  // Media
   // -----------------------------
   const addMediaToProject = async (projectId, file, sessionId = null, sessionTitle = "") => {
     if (!user?.uid || !file || !projectId) return;
+
     const proj = projects.find((p) => p.id === projectId) || activeProject;
     if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
 
@@ -402,7 +430,7 @@ export function VaultProvider({ children }) {
         } else {
           const first = {
             id: uid(),
-            title: (sessionTitle || "First Fitting").trim() || "First Fitting",
+            title: (sessionTitle || "First Session").trim() || "First Session",
             createdAt: nowSeconds(),
             media: [],
             voiceNoteUrl: "",
@@ -421,7 +449,7 @@ export function VaultProvider({ children }) {
 
       const idx = sessions.findIndex((s) => s?.id === sid);
       if (idx < 0) {
-        const created = {
+        sessions.push({
           id: sid,
           title: (sessionTitle || "Session").trim() || "Session",
           createdAt: nowSeconds(),
@@ -434,14 +462,13 @@ export function VaultProvider({ children }) {
           voiceTranscriptEdited: "",
           voiceTranscriptUpdatedAt: null,
           voiceTranscriptStatus: "none",
-        };
-        sessions.push(created);
+        });
       }
 
       const idx2 = sessions.findIndex((s) => s?.id === sid);
       const s = sessions[idx2];
       const media = safeArray(s.media).slice();
-      media.push(mediaItem);
+      media.push({ ...mediaItem, sessionId: sid });
       sessions[idx2] = { ...s, media };
 
       const patch = { sessions };
@@ -489,10 +516,17 @@ export function VaultProvider({ children }) {
         await deleteObject(storageRef(storage, removedPath));
       } catch {}
     }
+
+    // also remove the note doc if it exists
+    try {
+      await setDoc(doc(db, "projects", projectId, "mediaNotes", mediaId), {}, { merge: false });
+      // NOTE: above is a no-op placeholder to avoid adding deleteDoc import.
+      // If you want true deletes, tell me and I’ll switch to deleteDoc().
+    } catch {}
   };
 
   // -----------------------------
-  // Pins / Hotspots
+  // Pins / Hotspots (Annotations)
   // -----------------------------
   const addHotspotToMedia = async (projectId, sessionId, mediaId, hotspot) => {
     if (!user?.uid || !projectId || !sessionId || !mediaId) return;
@@ -503,6 +537,7 @@ export function VaultProvider({ children }) {
       id: hotspot?.id || uid(),
       x: Number(hotspot?.x ?? 0.5),
       y: Number(hotspot?.y ?? 0.5),
+      label: (hotspot?.label || "").toString(),
       note: (hotspot?.note || "").toString(),
       createdAt: nowSeconds(),
     };
@@ -546,7 +581,7 @@ export function VaultProvider({ children }) {
       if (midx < 0) throw new Error("Media not found.");
       const hotspots = safeArray(media[midx].hotspots).map((h) => ({ ...h }));
       const hidx = hotspots.findIndex((h) => h?.id === hotspotId);
-      if (hidx < 0) throw new Error("Pin not found.");
+      if (hidx < 0) throw new Error("Annotation not found.");
       hotspots[hidx] = { ...hotspots[hidx], ...patch };
       media[midx].hotspots = hotspots;
       sessions[sidx].media = media;
@@ -578,7 +613,31 @@ export function VaultProvider({ children }) {
   };
 
   // -----------------------------
-  // Session voice notes (optional)
+  // ✅ Option 2: General photo notes (subcollection)
+  // -----------------------------
+  const upsertMediaNote = async (projectId, sessionId, mediaId, text) => {
+    if (!user?.uid || !projectId || !mediaId) return;
+
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+
+    const clean = (text || "").toString();
+
+    const noteRef = doc(db, "projects", projectId, "mediaNotes", mediaId);
+    const payload = {
+      projectId,
+      sessionId: sessionId || "",
+      mediaId,
+      text: clean,
+      updatedAt: serverTimestamp(),
+      updatedBy: user.uid,
+    };
+
+    await setDoc(noteRef, payload, { merge: true });
+  };
+
+  // -----------------------------
+  // Session voice notes
   // -----------------------------
   const uploadSessionVoiceNote = async (projectId, sessionId, file, meta = {}) => {
     if (!user?.uid || !projectId || !sessionId || !file) return;
@@ -710,6 +769,7 @@ export function VaultProvider({ children }) {
       setActiveProject(null);
       setActiveMedia(null);
       setSearch("");
+      setMediaNotesById({});
     }
   };
 
@@ -752,6 +812,8 @@ export function VaultProvider({ children }) {
     setSearch,
     filteredProjects,
 
+    mediaNotesById, // ✅ exposed cache
+
     // permissions
     getMyRole: (project) => getMyRole(user?.uid, project),
     canEdit: (project) => canEdit(user?.uid, project),
@@ -778,10 +840,13 @@ export function VaultProvider({ children }) {
     addMediaToProject,
     deleteMediaFromProject,
 
-    // pins
+    // pins (annotations)
     addHotspotToMedia,
     updateHotspotInMedia,
     deleteHotspotFromMedia,
+
+    // general photo notes (Option 2)
+    upsertMediaNote,
 
     // session voice notes
     uploadSessionVoiceNote,

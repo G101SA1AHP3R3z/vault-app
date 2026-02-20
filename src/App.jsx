@@ -135,7 +135,10 @@ function VoiceNoteRecorderModal({ open, palette, headerFont, title, onClose, onS
               <div className="text-[11px] font-semibold tracking-[0.18em]" style={{ color: "rgba(0,0,0,0.42)" }}>
                 VOICE NOTE
               </div>
-              <div className="mt-2 text-[16px] font-semibold" style={{ fontFamily: headerFont, color: "rgba(0,0,0,0.86)" }}>
+              <div
+                className="mt-2 text-[16px] font-semibold"
+                style={{ fontFamily: headerFont, color: "rgba(0,0,0,0.86)" }}
+              >
                 {title || "Session"}
               </div>
             </div>
@@ -219,7 +222,6 @@ function VoiceNoteRecorderModal({ open, palette, headerFont, title, onClose, onS
 
 function AuthGate({ children }) {
   const { user, authReady } = useVault();
-
   if (!authReady) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#FFFEFA" }}>
@@ -235,9 +237,18 @@ function AbstractCreamBackdrop({ children }) {
   return (
     <div className="min-h-screen relative" style={{ background: "#FFFEFA" }}>
       <div className="fixed inset-0 -z-10 overflow-hidden">
-        <div className="absolute -top-28 -left-28 w-[520px] h-[520px] rounded-[48px] rotate-[18deg]" style={{ background: "#FFEA3A", opacity: 0.12 }} />
-        <div className="absolute top-10 -right-64 w-[820px] h-[300px] rounded-[60px] rotate-[-12deg]" style={{ background: "#3AA8FF", opacity: 0.08 }} />
-        <div className="absolute -bottom-44 left-16 w-[760px] h-[460px] rounded-[70px] rotate-[10deg]" style={{ background: "#54E6C1", opacity: 0.07 }} />
+        <div
+          className="absolute -top-28 -left-28 w-[520px] h-[520px] rounded-[48px] rotate-[18deg]"
+          style={{ background: "#FFEA3A", opacity: 0.12 }}
+        />
+        <div
+          className="absolute top-10 -right-64 w-[820px] h-[300px] rounded-[60px] rotate-[-12deg]"
+          style={{ background: "#3AA8FF", opacity: 0.08 }}
+        />
+        <div
+          className="absolute -bottom-44 left-16 w-[760px] h-[460px] rounded-[70px] rotate-[10deg]"
+          style={{ background: "#54E6C1", opacity: 0.07 }}
+        />
         <div
           className="absolute inset-0"
           style={{
@@ -247,7 +258,6 @@ function AbstractCreamBackdrop({ children }) {
           }}
         />
       </div>
-
       {children}
     </div>
   );
@@ -284,6 +294,10 @@ function VaultShell() {
     activeProject,
     setActiveProject,
 
+    // ✅ option 2
+    mediaNotesById,
+    upsertMediaNote,
+
     // projects
     addProject,
     renameProject,
@@ -306,7 +320,7 @@ function VaultShell() {
     updateHotspotInMedia,
     deleteHotspotFromMedia,
 
-    // session voice notes
+    // voice
     uploadSessionVoiceNote,
     updateSessionVoiceTranscript,
     clearSessionVoiceNote,
@@ -348,7 +362,7 @@ function VaultShell() {
       setView("project");
 
       setPrefillSessionId(null);
-      setPrefillSessionTitle("First Fitting");
+      setPrefillSessionTitle("First Session");
       setAutoPromptMediaPicker(true);
       setMediaOpen(true);
     } catch (e) {
@@ -392,7 +406,6 @@ function VaultShell() {
 
     addSession?.(activeProject.id, clean)
       .then((session) => {
-        // Immediately offer to add photos (common flow)
         if (session?.id) {
           setPrefillSessionId(session.id);
           setPrefillSessionTitle(session.title || clean);
@@ -443,7 +456,7 @@ function VaultShell() {
 
   const removeProject = async () => {
     if (!activeProject?.id) return;
-    if (!confirm("Move this project to the Graveyard?")) return;
+    if (!confirm("Move this project to the Archive?")) return;
 
     try {
       await archiveProject?.(activeProject.id);
@@ -509,7 +522,6 @@ function VaultShell() {
 
   const saveVoiceForSession = async ({ file, durationSec }) => {
     if (!activeProject?.id || !voiceSession?.id) return;
-    // IMPORTANT: Storage rules must allow audio/* contentType.
     await uploadSessionVoiceNote?.(activeProject.id, voiceSession.id, file, { durationSec });
   };
 
@@ -546,6 +558,14 @@ function VaultShell() {
       alert(e?.message || "Remove failed.");
     }
   };
+
+  // ✅ Inject general note from Option-2 cache
+  const mediaWithNote = useMemo(() => {
+    if (!mediaNav.selectedMedia) return null;
+    const noteDoc = mediaNotesById?.[mediaNav.selectedMedia.id];
+    const noteText = noteDoc?.text || "";
+    return { ...mediaNav.selectedMedia, note: noteText };
+  }, [mediaNav.selectedMedia, mediaNotesById]);
 
   return (
     <AbstractCreamBackdrop>
@@ -589,7 +609,6 @@ function VaultShell() {
                   </div>
                 ) : null}
 
-                {/* ✅ Settings tab renders Settings page */}
                 {tab === "vault" ? (
                   <Settings headerFont={headerFont} palette={palette} />
                 ) : (
@@ -634,11 +653,11 @@ function VaultShell() {
             )}
 
             {/* Viewer overlay */}
-            {mediaNav.viewerOpen && activeProject && mediaNav.selectedMedia && (
+            {mediaNav.viewerOpen && activeProject && mediaWithNote && (
               <MediaViewer
                 mode="modal"
                 project={activeProject}
-                media={mediaNav.selectedMedia}
+                media={mediaWithNote}
                 headerFont={headerFont}
                 palette={palette}
                 mediaIndex={Math.max(0, mediaNav.selectedIndex)}
@@ -653,6 +672,7 @@ function VaultShell() {
                 onAddHotspot={addHotspotToMedia}
                 onUpdateHotspot={updateHotspotInMedia}
                 onDeleteHotspot={deleteHotspotFromMedia}
+                onUpdateMediaNote={upsertMediaNote} // ✅ Option 2 hook
               />
             )}
 
