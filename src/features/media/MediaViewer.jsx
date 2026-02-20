@@ -201,12 +201,26 @@ export default function MediaViewer({
 
   const Outer = ({ children }) => {
     if (isEmbedded) return <div className="w-full relative">{children}</div>;
-    return <div className="fixed inset-0 z-[100] bg-white">{children}</div>;
+    // Pure white for bright media + less perceived “gray haze”
+    return (
+      <div className="fixed inset-0 z-[100]" style={{ background: "#FFFFFF" }}>
+        {children}
+      </div>
+    );
   };
 
   return (
     <Outer>
-      <div className={isEmbedded ? "w-full h-full relative" : "h-full w-full overflow-y-auto relative"}>
+      {/*
+        Keep the viewer itself non-scrollable.
+        Otherwise, vertical scroll steals pointer/touch gestures and causes the
+        “jump / missed swipe” issue on fast swipes.
+      */}
+      <div
+        className={
+          isEmbedded ? "w-full h-full relative" : "h-full w-full overflow-hidden relative flex flex-col"
+        }
+      >
         <MediaStage
           isEmbedded={isEmbedded}
           stageRef={stageRef}
@@ -236,45 +250,38 @@ export default function MediaViewer({
             swipe.onPointerDown(e);
           }}
           onStagePointerMove={(e) => {
-            if (drag.draggingPinId) {
-              drag.onStagePointerMove?.(e);
-            } else {
-              swipe.onPointerMove(e);
-            }
+            if (drag.draggingPinId) drag.onStagePointerMove?.(e);
+            else swipe.onPointerMove(e);
           }}
           onStagePointerUp={(e) => {
-            if (drag.draggingPinId) {
-              drag.onStagePointerUp?.(e);
-            } else {
-              swipe.onPointerEnd(e);
-            }
+            if (drag.draggingPinId) drag.onStagePointerUp?.(e);
+            else swipe.onPointerEnd(e);
           }}
           onStagePointerCancel={(e) => {
-            if (drag.draggingPinId) {
-              drag.onStagePointerUp?.(e);
-            } else {
-              swipe.onPointerEnd(e);
-            }
+            if (drag.draggingPinId) drag.onStagePointerUp?.(e);
+            else swipe.onPointerEnd(e);
           }}
           gapPx={GAP_PX}
         />
 
         {!isFocusMode && (
-          <PinNotesPanel
-            headerFont={headerFont}
-            palette={palette}
-            projectId={project?.id}
-            hotspots={currentHotspots}
-            selectedPin={drag.selectedPin}
-            setSelectedPinId={setSelectedPinId}
-            isAddPinMode={isAddPinMode}
-            toggleAddPinMode={() => setIsAddPinMode((v) => !v)}
-            openPinEditor={openPinEditor}
-            onUpdateMediaNote={onUpdateMediaNote}
-            media={media}
-            moreFromSession={moreFromSession}
-            onSelectMedia={(m) => onSelectMedia?.(m)}
-          />
+          <div className={isEmbedded ? "" : "flex-1 overflow-y-auto"} style={{ background: "#FFFFFF" }}>
+            <PinNotesPanel
+              headerFont={headerFont}
+              palette={palette}
+              projectId={project?.id}
+              hotspots={currentHotspots}
+              selectedPin={drag.selectedPin}
+              setSelectedPinId={setSelectedPinId}
+              isAddPinMode={isAddPinMode}
+              toggleAddPinMode={() => setIsAddPinMode((v) => !v)}
+              openPinEditor={openPinEditor}
+              onUpdateMediaNote={onUpdateMediaNote}
+              media={media}
+              moreFromSession={moreFromSession}
+              onSelectMedia={(m) => onSelectMedia?.(m)}
+            />
+          </div>
         )}
       </div>
 

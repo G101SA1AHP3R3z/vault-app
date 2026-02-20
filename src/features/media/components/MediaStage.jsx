@@ -54,17 +54,13 @@ export default function MediaStage({
 
   return (
     <div className={isEmbedded ? "w-full relative" : "w-full relative"}>
-      
-      {/* CHROME UI / BUTTONS 
-        These are now physically placed OUTSIDE the `stageRef` div below.
-        This completely prevents the swipe pointer-capture from swallowing your clicks. 
-      */}
+      {/* chrome buttons OUTSIDE stageRef so pointer-capture can’t swallow clicks */}
       <div className="absolute inset-0 pointer-events-none z-[60]">
         {!isEmbedded && (
           <button
             onClick={onBack}
             onPointerDown={(e) => e.stopPropagation()}
-            className="pointer-events-auto absolute top-4 left-4 w-10 h-10 rounded-full bg-white/90 border border-black/10 grid place-items-center shadow-sm hover:scale-105 active:scale-95 transition-transform"
+            className="pointer-events-auto absolute top-4 left-4 w-10 h-10 rounded-[10px] bg-white/92 border border-black/10 grid place-items-center shadow-sm hover:scale-105 active:scale-95 transition-transform"
             aria-label="Back"
           >
             <ChevronLeft className="w-5 h-5 text-black/80" />
@@ -75,7 +71,7 @@ export default function MediaStage({
           <button
             onClick={onDeleteMedia}
             onPointerDown={(e) => e.stopPropagation()}
-            className="pointer-events-auto absolute top-4 right-4 w-10 h-10 rounded-full bg-white/90 border border-black/10 grid place-items-center shadow-sm hover:scale-105 active:scale-95 transition-transform"
+            className="pointer-events-auto absolute top-4 right-4 w-10 h-10 rounded-[10px] bg-white/92 border border-black/10 grid place-items-center shadow-sm hover:scale-105 active:scale-95 transition-transform"
             aria-label="Delete"
             title="Delete"
           >
@@ -84,35 +80,27 @@ export default function MediaStage({
         )}
       </div>
 
-      {/* SWIPE STAGE */}
+      {/* swipe stage */}
       <div
         ref={stageRef}
-        className={`relative w-full overflow-hidden bg-black/5 ${
+        className={`relative w-full overflow-hidden ${
           isAddPinMode && !isFocusMode ? "cursor-crosshair" : ""
         }`}
-        style={{ touchAction: "pan-y", height: stageHeight }}
+        style={{ touchAction: "none", height: stageHeight, background: "#FFFFFF" }}
         onClick={onClickToAddPin}
         onPointerDown={onStagePointerDown}
         onPointerMove={onStagePointerMove}
         onPointerUp={onStagePointerUp}
         onPointerCancel={onStagePointerCancel}
       >
-        {/* NATIVE CAROUSEL WRAPPER */}
-        <div
-          ref={carouselRef}
-          className="absolute inset-0 w-full h-full"
-          style={{ willChange: "transform" }}
-        >
-          {/* Prev Photo */}
-          <div 
-            className="absolute inset-0 w-full h-full" 
-            style={{ left: `calc(-100% - ${gapPx}px)` }}
-          >
+        <div ref={carouselRef} className="absolute inset-0 w-full h-full" style={{ willChange: "transform" }}>
+          {/* Prev */}
+          <div className="absolute inset-0 w-full h-full" style={{ left: `calc(-100% - ${gapPx}px)` }}>
             {showPrev && (
               <img
                 src={prevSrc}
                 decoding="async"
-                loading="lazy"
+                loading="eager"
                 className="w-full h-full object-cover"
                 alt=""
                 draggable={false}
@@ -120,16 +108,14 @@ export default function MediaStage({
             )}
           </div>
 
-          {/* Current Photo & Pins */}
+          {/* Current */}
           <div className="absolute inset-0 w-full h-full" style={{ left: "0%" }}>
             {currentSrc && (
               <img
                 src={currentSrc}
                 decoding="async"
                 loading="eager"
-                className={`w-full h-full object-cover ${
-                  isAddPinMode ? "opacity-90" : "opacity-100"
-                }`}
+                className={`w-full h-full object-cover ${isAddPinMode ? "opacity-90" : "opacity-100"}`}
                 alt=""
                 draggable={false}
               />
@@ -137,9 +123,7 @@ export default function MediaStage({
 
             {!isFocusMode &&
               hotspots.map((h, idx) => {
-                const { x, y } = getDisplayXY
-                  ? getDisplayXY(h)
-                  : { x: clamp01(h.x), y: clamp01(h.y) };
+                const { x, y } = getDisplayXY ? getDisplayXY(h) : { x: clamp01(h.x), y: clamp01(h.y) };
                 const left = `${x * 100}%`;
                 const top = `${y * 100}%`;
                 const number = idx + 1;
@@ -150,16 +134,12 @@ export default function MediaStage({
                     key={h.id}
                     type="button"
                     onPointerDown={(e) => {
-                      e.stopPropagation(); // Stop swipe from triggering if grabbing a pin
+                      e.stopPropagation();
                       onPinPointerDown?.(e, h);
                     }}
                     className={`absolute -translate-x-1/2 -translate-y-1/2 select-none touch-none
                       transition-transform duration-150 ease-out
-                      ${
-                        isAddPinMode
-                          ? "pointer-events-none opacity-25 scale-90"
-                          : "pointer-events-auto"
-                      }
+                      ${isAddPinMode ? "pointer-events-none opacity-25 scale-90" : "pointer-events-auto"}
                       ${draggingPinId === h.id ? "scale-[1.10] z-50" : "z-10 hover:scale-[1.03]"}
                     `}
                     style={{
@@ -178,7 +158,7 @@ export default function MediaStage({
                         background: "rgba(255,255,255,0.95)",
                         color: "rgba(0,0,0,0.75)",
                         border: isSelected
-                          ? `2px solid ${palette?.sun || "#FFEA3A"}`
+                          ? `2px solid ${palette?.accent || "rgba(255,77,46,0.95)"}`
                           : `1px solid ${palette?.pinEdge || "rgba(0,0,0,0.12)"}`,
                       }}
                     >
@@ -189,16 +169,13 @@ export default function MediaStage({
               })}
           </div>
 
-          {/* Next Photo */}
-          <div 
-            className="absolute inset-0 w-full h-full" 
-            style={{ left: `calc(100% + ${gapPx}px)` }}
-          >
+          {/* Next */}
+          <div className="absolute inset-0 w-full h-full" style={{ left: `calc(100% + ${gapPx}px)` }}>
             {showNext && (
               <img
                 src={nextSrc}
                 decoding="async"
-                loading="lazy"
+                loading="eager"
                 className="w-full h-full object-cover"
                 alt=""
                 draggable={false}
@@ -207,22 +184,18 @@ export default function MediaStage({
           </div>
         </div>
 
-        {/* Trash drop zone */}
+        {/* trash */}
         {!isFocusMode && (
           <div
             ref={trashRef}
             className={`absolute bottom-6 left-1/2 -translate-x-1/2 transition-all duration-200 ease-out z-50 ${
-              draggingPinId
-                ? "opacity-100 translate-y-0 scale-100"
-                : "opacity-0 translate-y-3 scale-95 pointer-events-none"
+              draggingPinId ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-3 scale-95 pointer-events-none"
             }`}
           >
             <div
               className="w-16 h-16 rounded-full flex items-center justify-center shadow-2xl transition-all duration-150 ease-out"
               style={{
-                background: isHoveringTrash
-                  ? "rgba(220,38,38,0.95)"
-                  : "rgba(0,0,0,0.55)",
+                background: isHoveringTrash ? "rgba(220,38,38,0.95)" : "rgba(0,0,0,0.55)",
                 border: "1px solid rgba(255,255,255,0.16)",
                 color: isHoveringTrash ? "#fff" : "rgba(255,200,200,0.95)",
                 backdropFilter: "blur(12px)",
@@ -234,7 +207,7 @@ export default function MediaStage({
           </div>
         )}
 
-        {/* Add-pin hint */}
+        {/* add-pin hint */}
         {isAddPinMode && !isFocusMode && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none z-50">
             <div
