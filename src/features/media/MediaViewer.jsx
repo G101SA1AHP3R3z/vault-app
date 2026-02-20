@@ -5,12 +5,25 @@ import MediaStage from "./components/MediaStage";
 import PinNotesPanel from "./components/PinNotesPanel";
 import PinEditorModal from "../../components/PinEditorModal";
 
-const EASE = "cubic-bezier(.22,.61,.36,1)";
+const EASE_IOS = "cubic-bezier(.16,1,.3,1)";
+const INFO_DUR = 420;
 
 function clamp01(n) {
   const x = Number(n);
   if (Number.isNaN(x)) return 0;
   return Math.max(0, Math.min(1, x));
+}
+
+function resolveMediaUrl(m) {
+  if (!m) return "";
+  return (
+    (typeof m.url === "string" && m.url) ||
+    (typeof m.downloadURL === "string" && m.downloadURL) ||
+    (typeof m.coverPhoto === "string" && m.coverPhoto) ||
+    (typeof m.src === "string" && m.src) ||
+    (typeof m.originalUrl === "string" && m.originalUrl) ||
+    ""
+  );
 }
 
 export default function MediaViewer({
@@ -37,10 +50,11 @@ export default function MediaViewer({
   const isEmbedded = mode === "embedded";
 
   /**
-   * iOS Photos-like states:
+   * iOS Photos-inspired:
    * - immersive: black bg, no chrome
-   * - controls: light bg, nav + filmstrip + bottom bar, NO photo shift/scale
-   * - info: light bg, nav stays, filmstrip/bottom hidden, photo moves up + subtle scale, notes below
+   * - controls: light bg, nav + filmstrip + bottom bar, no photo shift
+   * - info: light bg, nav + bottom bar stay (i selected), filmstrip hidden,
+   *         photo "appears" top-half via clip-path + notes sheet floats up
    */
   const [viewMode, setViewMode] = useState("immersive"); // "immersive" | "controls" | "info"
 
@@ -52,32 +66,42 @@ export default function MediaViewer({
 
   const stageRef = useRef(null);
 
+  // Ensure MediaStage always gets a usable url
+  const stageMedia = useMemo(() => {
+    const url = resolveMediaUrl(media);
+    return media ? { ...media, url } : media;
+  }, [media]);
+
   const currentHotspots = useMemo(() => {
-    return Array.isArray(media?.hotspots) ? media.hotspots : [];
-  }, [media?.hotspots]);
+    return Array.isArray(stageMedia?.hotspots) ? stageMedia.hotspots : [];
+  }, [stageMedia?.hotspots]);
 
   const selectedPin = useMemo(() => {
     if (!selectedPinId) return null;
     return currentHotspots.find((h) => h.id === selectedPinId) || null;
   }, [selectedPinId, currentHotspots]);
 
-  // Reset per-media
+  // Do NOT reset viewMode on media change (keeps light mode while browsing filmstrip)
   useEffect(() => {
-    setViewMode("immersive");
     setSelectedPinId(null);
     setIsAddPinMode(false);
     setPinOpen(false);
     setPinDraft(null);
-  }, [media?.id]);
+  }, [stageMedia?.id]);
 
-  const bg = viewMode === "immersive" ? "#000000" : "#FFFEFA";
+  const isInfo = viewMode === "info";
+  const isControls = viewMode === "controls";
+  const isImmersive = viewMode === "immersive";
 
-  // Photo layout rules:
-  // - immersive: full height, no scale
-  // - controls: full height, no scale (per your requirement)
-  // - info: top half + subtle scale (Apple-like)
-  const stageHeight = viewMode === "info" ? (isEmbedded ? "52vh" : "50vh") : "100vh";
-  const stageScale = viewMode === "info" ? 0.975 : 1;
+  const bg = isImmersive ? "#000000" : "#FFFEFA";
+
+  // Float illusion: clip photo bottom half + slide sheet up
+  const clipBottom = isInfo ? "50vh" : "0px";
+  const imgZoom = isInfo ? 1.05 : 1.0;
+  const fitMode = isInfo ? "cover" : "contain";
+
+  // Pins only in info mode and only after selecting an annotation
+  const showPins = isInfo && !!selectedPinId && !isAddPinMode;
 
   const accent = palette?.accent || "rgba(255,77,46,0.95)";
 
@@ -101,9 +125,13 @@ export default function MediaViewer({
   const savePinEditor = async (nextText) => {
     if (!pinDraft?.id) return closePinEditor();
     try {
-      await onUpdateHotspot?.(project?.id, media?.sessionId, media?.id, pinDraft.id, {
-        note: nextText,
-      });
+      await onUpdateHotspot?.(
+        project?.id,
+        stageMedia?.sessionId,
+        stageMedia?.id,
+        pinDraft.id,
+        { note: nextText }
+      );
     } catch (err) {
       console.error("Failed to update pin note", err);
     } finally {
@@ -112,7 +140,7 @@ export default function MediaViewer({
   };
 
   const onClickToAddPin = async (e) => {
-    if (viewMode !== "info") return;
+    if (!isInfo) return;
     if (!isAddPinMode) return;
     if (!stageRef.current) return;
 
@@ -121,7 +149,7 @@ export default function MediaViewer({
     const y = (e.clientY - rect.top) / rect.height;
 
     try {
-      await onAddHotspot?.(project?.id, media?.sessionId, media?.id, {
+      await onAddHotspot?.(project?.id, stageMedia?.sessionId, stageMedia?.id, {
         x: clamp01(x),
         y: clamp01(y),
       });
@@ -132,7 +160,7 @@ export default function MediaViewer({
   };
 
   const handleShare = async () => {
-    const url = media?.url;
+    const url = stageMedia?.url;
     if (!url) return;
 
     try {
@@ -141,7 +169,7 @@ export default function MediaViewer({
         return;
       }
     } catch {
-      return; // cancelled
+      return;
     }
 
     try {
@@ -162,52 +190,50 @@ export default function MediaViewer({
     }
   };
 
-  // Tap anywhere toggles immersive <-> controls, but:
-  // - never toggle while in info
-  // - never toggle when a modal is open
-  // - never toggle while add-pin is active (info only anyway)
+  // Tap anywhere toggles immersive <-> controls ONLY (not info)
   const handleStageTapToggle = () => {
-    if (isEmbedded) return; // optional: keep embedded stable
+    if (isEmbedded) return;
     if (pinOpen) return;
-    if (viewMode === "info") return;
+    if (isInfo) return;
     setViewMode((m) => (m === "immersive" ? "controls" : "immersive"));
   };
 
-  // In viewer mode: ZERO pins.
-  // In info mode: pins only show after user selects an annotation (and not while placing a new one).
-  const showPins = viewMode === "info" && !!selectedPinId && !isAddPinMode;
-
   const filmstrip = useMemo(() => {
-    const list = Array.isArray(moreFromSession) ? moreFromSession.filter((m) => m?.url) : [];
+    const list = Array.isArray(moreFromSession)
+      ? moreFromSession.filter((m) => resolveMediaUrl(m))
+      : [];
     return list;
   }, [moreFromSession]);
 
   const Outer = ({ children }) => {
     if (isEmbedded) return <div className="w-full relative">{children}</div>;
     return (
-      <div className="fixed inset-0 z-[100]" style={{ background: bg, overscrollBehavior: "contain" }}>
+      <div
+        className="fixed inset-0 z-[100]"
+        style={{ background: bg, overscrollBehavior: "contain" }}
+      >
         {children}
       </div>
     );
   };
 
-  const showNav = !isEmbedded && (viewMode === "controls" || viewMode === "info");
-  const showFilmstrip = !isEmbedded && viewMode === "controls";
-  const showBottomBar = !isEmbedded && viewMode === "controls";
+  const showNav = !isEmbedded && (isControls || isInfo);
+  const showFilmstrip = !isEmbedded && isControls;
+  const showBottomBar = !isEmbedded && (isControls || isInfo);
 
   return (
     <Outer>
       <div
-        className={isEmbedded ? "w-full h-full relative" : "h-full w-full"}
+        className={isEmbedded ? "w-full h-full relative" : "h-full w-full relative"}
         style={{
           background: bg,
-          transition: `background 220ms ${EASE}`,
+          transition: `background 220ms ${EASE_IOS}`,
         }}
       >
-        {/* NAV BAR (visible in controls + info) */}
+        {/* NAV BAR (controls + info) — CENTER INTENTIONALLY EMPTY (no random project title overlay) */}
         {showNav && (
-          <div className="absolute top-0 left-0 right-0 z-[90] pointer-events-none">
-            <div className="px-4 pt-4 flex items-center justify-between">
+          <div className="absolute top-0 left-0 right-0 z-[220] pointer-events-none">
+            <div className="px-4 pt-4 flex items-center justify-between gap-3">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -220,212 +246,191 @@ export default function MediaViewer({
                 }}
                 aria-label="Back"
               >
-                <ChevronLeft className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
+                <ChevronLeft
+                  className="w-5 h-5"
+                  style={{ color: "rgba(0,0,0,0.82)" }}
+                />
               </button>
 
-              <div
-                className="pointer-events-none text-[12px] font-semibold tracking-[0.14em]"
-                style={{
-                  fontFamily: headerFont,
-                  color: "rgba(0,0,0,0.55)",
-                }}
-              >
-                {project?.title || ""}
-              </div>
+              {/* center spacer */}
+              <div className="flex-1" />
 
-              {viewMode === "info" ? (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setViewMode("controls");
-                    setIsAddPinMode(false);
-                    setSelectedPinId(null);
-                  }}
-                  className="pointer-events-auto px-3 h-10 rounded-[10px] text-[12px] font-semibold"
-                  style={{
-                    background: "rgba(255,255,255,0.92)",
-                    border: "1px solid rgba(0,0,0,0.10)",
-                    color: "rgba(0,0,0,0.78)",
-                  }}
-                >
-                  Done
-                </button>
-              ) : (
-                <div className="w-10 h-10" />
-              )}
+              {/* right spacer */}
+              <div className="w-10 h-10" />
             </div>
           </div>
         )}
 
-        {/* PHOTO STAGE (tap toggles immersive/controls) */}
+        {/* PHOTO AREA — ALWAYS 100vh. Float illusion via clip-path + sheet translate. */}
         <div
-          onClick={(e) => {
-            // tapping UI should not toggle; UI stops propagation.
-            // tapping on the photo area toggles immersive <-> controls
-            if (viewMode !== "info") handleStageTapToggle();
-          }}
-          style={{
-            height: stageHeight,
-            transform: `scale(${stageScale})`,
-            transformOrigin: "top center",
-            transition:
-              viewMode === "info"
-                ? `transform 260ms ${EASE}, height 260ms ${EASE}`
-                : "none",
-          }}
+          className="relative w-full"
+          style={{ height: "100vh" }}
+          onClick={() => !isInfo && handleStageTapToggle()}
         >
           <MediaStage
             isEmbedded={isEmbedded}
-            stageHeight={stageHeight}
             stageRef={stageRef}
-            trashRef={null}
-            media={media}
-            isAddPinMode={viewMode === "info" ? isAddPinMode : false}
+            media={stageMedia}
+            fit={fitMode}
+            imgZoom={imgZoom}
+            clipBottom={clipBottom}
+            isAddPinMode={isInfo ? isAddPinMode : false}
             isFocusMode={false}
             onClickToAddPin={(e) => {
-              // In info mode, clicking to add pin should not toggle view modes.
-              e.stopPropagation();
-              onClickToAddPin(e);
+              // Only consume tap if actively placing a pin in info mode
+              if (isInfo && isAddPinMode) {
+                e.stopPropagation();
+                onClickToAddPin(e);
+              }
             }}
             hotspots={showPins ? currentHotspots : []}
             selectedPin={selectedPin}
             palette={palette}
-            draggingPinId={null}
-            isHoveringTrash={false}
             getDisplayXY={getDisplayXY}
             showPins={showPins}
             onPinPointerDown={(e, pin) => {
-              // selecting an annotation should not toggle
               e.preventDefault();
               e.stopPropagation();
               setSelectedPinId(pin?.id || null);
             }}
           />
+
+          {/* FILMSTRIP (controls only) */}
+          {showFilmstrip && filmstrip.length > 0 && (
+            <div
+              className="absolute left-0 right-0 bottom-[76px] z-[160]"
+              onClick={(e) => e.stopPropagation()}
+              style={{ opacity: 1, transition: `opacity 160ms ${EASE_IOS}` }}
+            >
+              <div
+                className="px-4 pb-2 flex gap-2 overflow-x-auto hide-scrollbar"
+                style={{ WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}
+              >
+                {filmstrip.map((m) => {
+                  const mUrl = resolveMediaUrl(m);
+                  const active = m.id === stageMedia?.id;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectMedia?.({ ...m, url: mUrl });
+                        // If invoked while immersive, keep it light after selection
+                        if (viewMode === "immersive") setViewMode("controls");
+                      }}
+                      className="shrink-0"
+                      style={{ WebkitTapHighlightColor: "transparent" }}
+                      aria-label="Open photo"
+                      title="Open photo"
+                    >
+                      <div
+                        className="overflow-hidden"
+                        style={{
+                          width: 54,
+                          height: 54,
+                          borderRadius: 12,
+                          border: active
+                            ? "2px solid rgba(0,0,0,0.82)"
+                            : "1px solid rgba(0,0,0,0.12)",
+                          background: "rgba(0,0,0,0.04)",
+                        }}
+                      >
+                        <img
+                          src={m.thumbnailUrl || mUrl}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          decoding="async"
+                          draggable={false}
+                        />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* BOTTOM BAR (controls + info): share / info / delete */}
+          {showBottomBar && (
+            <div
+              className="absolute left-0 right-0 bottom-0 z-[180] pb-5 flex justify-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                className="h-12 px-5 rounded-[999px] flex items-center gap-7"
+                style={{
+                  background: "rgba(255,255,255,0.92)",
+                  border: "1px solid rgba(0,0,0,0.10)",
+                  backdropFilter: "blur(14px)",
+                }}
+              >
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleShare();
+                  }}
+                  className="w-9 h-9 grid place-items-center"
+                  aria-label="Share"
+                >
+                  <Share2
+                    className="w-5 h-5"
+                    style={{ color: "rgba(0,0,0,0.82)" }}
+                  />
+                </button>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setViewMode((m) => (m === "info" ? "controls" : "info"));
+                    setIsAddPinMode(false);
+                    setSelectedPinId(null);
+                  }}
+                  className="w-9 h-9 grid place-items-center rounded-full"
+                  aria-label="Info"
+                  style={{ background: isInfo ? "rgba(0,0,0,0.08)" : "transparent" }}
+                >
+                  <Info
+                    className="w-5 h-5"
+                    style={{ color: "rgba(0,0,0,0.82)" }}
+                  />
+                </button>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete();
+                  }}
+                  className="w-9 h-9 grid place-items-center"
+                  aria-label="Delete"
+                >
+                  <Trash2
+                    className="w-5 h-5"
+                    style={{ color: "rgba(220,38,38,0.92)" }}
+                  />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* FILMSTRIP (controls only) */}
-        {showFilmstrip && filmstrip.length > 0 && (
+        {/* NOTES SHEET — always mounted; floats up via transform */}
+        {!isEmbedded && (
           <div
-            className="absolute left-0 right-0 bottom-[76px] z-[95]"
-            style={{
-              opacity: viewMode === "controls" ? 1 : 0,
-              transition: `opacity 160ms ${EASE}`,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              className="px-4 pb-2 flex gap-2 overflow-x-auto hide-scrollbar"
-              style={{
-                WebkitOverflowScrolling: "touch",
-                scrollbarWidth: "none",
-              }}
-            >
-              {filmstrip.map((m) => {
-                const active = m.id === media?.id;
-                return (
-                  <button
-                    key={m.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSelectMedia?.(m);
-                    }}
-                    className="shrink-0"
-                    style={{ WebkitTapHighlightColor: "transparent" }}
-                    aria-label="Open photo"
-                    title="Open photo"
-                  >
-                    <div
-                      className="overflow-hidden"
-                      style={{
-                        width: 54,
-                        height: 54,
-                        borderRadius: 12,
-                        border: active ? "2px solid rgba(0,0,0,0.82)" : "1px solid rgba(0,0,0,0.12)",
-                        background: "rgba(0,0,0,0.04)",
-                      }}
-                    >
-                      <img
-                        src={m.thumbnailUrl || m.url}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        decoding="async"
-                        draggable={false}
-                      />
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* BOTTOM BAR (controls only): share / info / delete */}
-        {showBottomBar && (
-          <div
-            className="absolute left-0 right-0 bottom-0 z-[100] pb-5 flex justify-center"
             onClick={(e) => e.stopPropagation()}
             style={{
-              opacity: viewMode === "controls" ? 1 : 0,
-              transition: `opacity 160ms ${EASE}`,
-            }}
-          >
-            <div
-              className="h-12 px-5 rounded-[999px] flex items-center gap-7"
-              style={{
-                background: "rgba(255,255,255,0.92)",
-                border: "1px solid rgba(0,0,0,0.10)",
-                backdropFilter: "blur(14px)",
-              }}
-            >
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleShare();
-                }}
-                className="w-9 h-9 grid place-items-center"
-                aria-label="Share"
-              >
-                <Share2 className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
-              </button>
-
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setViewMode("info");
-                  setIsAddPinMode(false);
-                  setSelectedPinId(null);
-                }}
-                className="w-9 h-9 grid place-items-center"
-                aria-label="Info"
-              >
-                <Info className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
-              </button>
-
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDelete();
-                }}
-                className="w-9 h-9 grid place-items-center"
-                aria-label="Delete"
-              >
-                <Trash2 className="w-5 h-5" style={{ color: "rgba(220,38,38,0.92)" }} />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* NOTES / INFO CONTENT (info only) */}
-        {!isEmbedded && viewMode === "info" && (
-          <div
-            className="w-full"
-            onClick={(e) => e.stopPropagation()}
-            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 170,
               background: "#FFFEFA",
               borderTop: "1px solid rgba(0,0,0,0.08)",
               minHeight: "50vh",
-              // smoother than before: opacity + translate for the sheet
-              animation: "none",
+              transform: isInfo ? "translateY(0%)" : "translateY(100%)",
+              opacity: isInfo ? 1 : 0,
+              transition: `transform ${INFO_DUR}ms ${EASE_IOS}, opacity 220ms ${EASE_IOS}`,
+              willChange: "transform, opacity",
+              pointerEvents: isInfo ? "auto" : "none",
             }}
           >
             <div className="px-5 pt-4">
@@ -434,41 +439,40 @@ export default function MediaViewer({
                 style={{ color: "rgba(0,0,0,0.55)", fontFamily: headerFont }}
               >
                 <span>DETAILS</span>
-                <span style={{ width: 4, height: 4, borderRadius: 99, background: accent, opacity: 0.7 }} />
+                <span
+                  style={{
+                    width: 4,
+                    height: 4,
+                    borderRadius: 99,
+                    background: accent,
+                    opacity: 0.7,
+                  }}
+                />
                 <span style={{ letterSpacing: 0, fontWeight: 700 }}>Notes</span>
               </div>
             </div>
 
-            <div
-              style={{
-                transform: "translateY(0px)",
-                opacity: 1,
-                transition: `transform 220ms ${EASE}, opacity 220ms ${EASE}`,
+            <PinNotesPanel
+              headerFont={headerFont}
+              palette={palette}
+              projectId={project?.id}
+              hotspots={currentHotspots}
+              selectedPin={selectedPin}
+              setSelectedPinId={(id) => setSelectedPinId(id)}
+              isAddPinMode={isAddPinMode}
+              toggleAddPinMode={() => {
+                setIsAddPinMode((v) => !v);
+                setSelectedPinId(null);
               }}
-            >
-              <PinNotesPanel
-                headerFont={headerFont}
-                palette={palette}
-                projectId={project?.id}
-                hotspots={currentHotspots}
-                selectedPin={selectedPin}
-                setSelectedPinId={(id) => {
-                  // Selecting an annotation reveals pins in the photo
-                  setSelectedPinId(id);
-                }}
-                isAddPinMode={isAddPinMode}
-                toggleAddPinMode={() => {
-                  setIsAddPinMode((v) => !v);
-                  setSelectedPinId(null);
-                }}
-                openPinEditor={openPinEditor}
-                onUpdateMediaNote={onUpdateMediaNote}
-                media={media}
-                moreFromSession={[]}
-                onSelectMedia={() => {}}
-                onDeleteHotspot={(pinId) => onDeleteHotspot?.(project?.id, media?.sessionId, media?.id, pinId)}
-              />
-            </div>
+              openPinEditor={openPinEditor}
+              onUpdateMediaNote={onUpdateMediaNote}
+              media={stageMedia}
+              moreFromSession={[]}
+              onSelectMedia={() => {}}
+              onDeleteHotspot={(pinId) =>
+                onDeleteHotspot?.(project?.id, stageMedia?.sessionId, stageMedia?.id, pinId)
+              }
+            />
           </div>
         )}
 
@@ -486,7 +490,6 @@ export default function MediaViewer({
           </div>
         )}
 
-        {/* Keyframes (local) */}
         <style>{`
           .hide-scrollbar::-webkit-scrollbar { display: none; }
         `}</style>
