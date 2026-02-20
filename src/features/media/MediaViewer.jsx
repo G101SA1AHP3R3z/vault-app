@@ -35,10 +35,17 @@ export default function MediaViewer({
   onAddHotspot,
   onUpdateHotspot,
   onDeleteHotspot,
+
+  // Optional: general notes per-photo (non-annotation notes)
+  // Suggested signature:
+  // onUpdateMediaNote(projectId, sessionId, mediaId, text)
+  onUpdateMediaNote,
 }) {
   const isEmbedded = mode === "embedded";
   const GAP_PX = 16;
 
+  // NOTE: keeping the internal state name to avoid churn across your codebase.
+  // This is “Add annotation” mode now.
   const [isAddPinMode, setIsAddPinMode] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [selectedPinId, setSelectedPinId] = useState(null);
@@ -137,35 +144,27 @@ export default function MediaViewer({
   const savePinEdits = async (nextDraft) => {
     if (!project?.id || !pinTarget) return;
     try {
-      await onUpdateHotspot?.(
-        project.id,
-        pinTarget.sessionId,
-        pinTarget.mediaId,
-        pinTarget.hotspotId,
-        { label: nextDraft?.label || "", note: nextDraft?.note || "" }
-      );
+      await onUpdateHotspot?.(project.id, pinTarget.sessionId, pinTarget.mediaId, pinTarget.hotspotId, {
+        label: nextDraft?.label || "",
+        note: nextDraft?.note || "",
+      });
       setPinOpen(false);
       setPinTarget(null);
     } catch (e) {
-      console.error("Failed to update pin:", e);
+      console.error("Failed to update annotation:", e);
     }
   };
 
   const deletePin = async () => {
     if (!project?.id || !pinTarget) return;
-    if (!confirm("Delete this pin?")) return;
+    if (!confirm("Delete this annotation?")) return;
     try {
-      await onDeleteHotspot?.(
-        project.id,
-        pinTarget.sessionId,
-        pinTarget.mediaId,
-        pinTarget.hotspotId
-      );
+      await onDeleteHotspot?.(project.id, pinTarget.sessionId, pinTarget.mediaId, pinTarget.hotspotId);
       setPinOpen(false);
       setPinTarget(null);
       setSelectedPinId(null);
     } catch (e) {
-      console.error("Failed to delete pin:", e);
+      console.error("Failed to delete annotation:", e);
     }
   };
 
@@ -195,13 +194,12 @@ export default function MediaViewer({
       setIsAddPinMode(false);
       setSelectedPinId(newPinId);
     } catch (err) {
-      console.error("Failed to save pin:", err);
-      alert("Failed to save pin. Check console.");
+      console.error("Failed to save annotation:", err);
+      alert("Failed to save annotation. Check console.");
     }
   };
 
   const Outer = ({ children }) => {
-    // FIXED: Stripped the 'relative' class off the modal view so it stays locked to the viewport
     if (isEmbedded) return <div className="w-full relative">{children}</div>;
     return <div className="fixed inset-0 z-[100] bg-white">{children}</div>;
   };
@@ -265,12 +263,14 @@ export default function MediaViewer({
           <PinNotesPanel
             headerFont={headerFont}
             palette={palette}
+            projectId={project?.id}
             hotspots={currentHotspots}
             selectedPin={drag.selectedPin}
             setSelectedPinId={setSelectedPinId}
             isAddPinMode={isAddPinMode}
             toggleAddPinMode={() => setIsAddPinMode((v) => !v)}
             openPinEditor={openPinEditor}
+            onUpdateMediaNote={onUpdateMediaNote}
             media={media}
             moreFromSession={moreFromSession}
             onSelectMedia={(m) => onSelectMedia?.(m)}
