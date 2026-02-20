@@ -224,194 +224,140 @@ export default function MediaViewer({
   return (
     <Outer>
       <div
-        className={isEmbedded ? "w-full h-full relative" : "h-full w-full relative"}
+  className="h-full w-full flex flex-col"
+  style={{
+    background: bg,
+    transition: `background 220ms ${EASE_IOS}`,
+  }}
+>
+  {/* NAV BAR */}
+  {showNav && (
+    <div className="z-[50] px-4 pt-4 pb-2 flex items-center justify-between">
+      <button
+        onClick={onBack}
+        className="w-10 h-10 rounded-[10px] grid place-items-center"
         style={{
-          background: bg,
-          transition: `background 220ms ${EASE_IOS}`,
+          background: "rgba(255,255,255,0.95)",
+          border: "1px solid rgba(0,0,0,0.10)",
         }}
       >
-        {/* NAV BAR (controls + info) — CENTER INTENTIONALLY EMPTY (no random project title overlay) */}
-        {showNav && (
-          <div className="absolute top-0 left-0 right-0 z-[220] pointer-events-none">
-            <div className="px-4 pt-4 flex items-center justify-between gap-3">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onBack?.();
-                }}
-                className="pointer-events-auto w-10 h-10 rounded-[10px] grid place-items-center"
+        <ChevronLeft className="w-5 h-5" />
+      </button>
+
+      <div className="flex-1" />
+      <div className="w-10 h-10" />
+    </div>
+  )}
+
+  {/* PHOTO STAGE */}
+  <div
+    className="relative flex-1"
+    onClick={() => !isInfo && handleStageTapToggle()}
+  >
+    <MediaStage
+      isEmbedded={isEmbedded}
+      stageRef={stageRef}
+      media={stageMedia}
+      fit={fitMode}
+      imgZoom={imgZoom}
+      clipBottom={clipBottom}
+      isAddPinMode={isInfo ? isAddPinMode : false}
+      isFocusMode={false}
+      onClickToAddPin={(e) => {
+        if (isInfo && isAddPinMode) {
+          e.stopPropagation();
+          onClickToAddPin(e);
+        }
+      }}
+      hotspots={showPins ? currentHotspots : []}
+      selectedPin={selectedPin}
+      palette={palette}
+      getDisplayXY={getDisplayXY}
+      showPins={showPins}
+      onPinPointerDown={(e, pin) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setSelectedPinId(pin?.id || null);
+      }}
+    />
+  </div>
+
+  {/* FILMSTRIP (now in normal flow, not overlaying) */}
+  {showFilmstrip && filmstrip.length > 0 && (
+    <div className="px-4 pb-3 pt-2">
+      <div className="flex gap-2 overflow-x-auto hide-scrollbar">
+        {filmstrip.map((m) => {
+          const mUrl = resolveMediaUrl(m);
+          const active = m.id === stageMedia?.id;
+
+          return (
+            <button
+              key={m.id}
+              onClick={() => {
+                onSelectMedia?.({ ...m, url: mUrl });
+                if (viewMode === "immersive") setViewMode("controls");
+              }}
+              className="shrink-0"
+            >
+              <div
                 style={{
-                  background: "rgba(255,255,255,0.92)",
-                  border: "1px solid rgba(0,0,0,0.10)",
+                  width: 54,
+                  height: 54,
+                  borderRadius: 12,
+                  overflow: "hidden",
+                  border: active
+                    ? "2px solid rgba(0,0,0,0.85)"
+                    : "1px solid rgba(0,0,0,0.12)",
                 }}
-                aria-label="Back"
               >
-                <ChevronLeft
-                  className="w-5 h-5"
-                  style={{ color: "rgba(0,0,0,0.82)" }}
+                <img
+                  src={m.thumbnailUrl || mUrl}
+                  alt=""
+                  className="w-full h-full object-cover"
                 />
-              </button>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  )}
 
-              {/* center spacer */}
-              <div className="flex-1" />
+  {/* BOTTOM BAR */}
+  {showBottomBar && (
+    <div className="pb-5 flex justify-center">
+      <div
+        className="h-12 px-5 rounded-[999px] flex items-center gap-7"
+        style={{
+          background: "rgba(255,255,255,0.95)",
+          border: "1px solid rgba(0,0,0,0.10)",
+          backdropFilter: "blur(14px)",
+        }}
+      >
+        <button onClick={handleShare}>
+          <Share2 className="w-5 h-5" />
+        </button>
 
-              {/* right spacer */}
-              <div className="w-10 h-10" />
-            </div>
-          </div>
-        )}
-
-        {/* PHOTO AREA — ALWAYS 100vh. Float illusion via clip-path + sheet translate. */}
-        <div
-          className="relative w-full"
-          style={{ height: "100vh" }}
-          onClick={() => !isInfo && handleStageTapToggle()}
+        <button
+          onClick={() =>
+            setViewMode((m) => (m === "info" ? "controls" : "info"))
+          }
+          style={{
+            background: isInfo ? "rgba(0,0,0,0.08)" : "transparent",
+            borderRadius: 999,
+            padding: 6,
+          }}
         >
-          <MediaStage
-            isEmbedded={isEmbedded}
-            stageRef={stageRef}
-            media={stageMedia}
-            fit={fitMode}
-            imgZoom={imgZoom}
-            clipBottom={clipBottom}
-            isAddPinMode={isInfo ? isAddPinMode : false}
-            isFocusMode={false}
-            onClickToAddPin={(e) => {
-              // Only consume tap if actively placing a pin in info mode
-              if (isInfo && isAddPinMode) {
-                e.stopPropagation();
-                onClickToAddPin(e);
-              }
-            }}
-            hotspots={showPins ? currentHotspots : []}
-            selectedPin={selectedPin}
-            palette={palette}
-            getDisplayXY={getDisplayXY}
-            showPins={showPins}
-            onPinPointerDown={(e, pin) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setSelectedPinId(pin?.id || null);
-            }}
-          />
+          <Info className="w-5 h-5" />
+        </button>
 
-          {/* FILMSTRIP (controls only) */}
-          {showFilmstrip && filmstrip.length > 0 && (
-            <div
-              className="absolute left-0 right-0 bottom-[76px] z-[160]"
-              onClick={(e) => e.stopPropagation()}
-              style={{ opacity: 1, transition: `opacity 160ms ${EASE_IOS}` }}
-            >
-              <div
-                className="px-4 pb-2 flex gap-2 overflow-x-auto hide-scrollbar"
-                style={{ WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}
-              >
-                {filmstrip.map((m) => {
-                  const mUrl = resolveMediaUrl(m);
-                  const active = m.id === stageMedia?.id;
-                  return (
-                    <button
-                      key={m.id}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectMedia?.({ ...m, url: mUrl });
-                        // If invoked while immersive, keep it light after selection
-                        if (viewMode === "immersive") setViewMode("controls");
-                      }}
-                      className="shrink-0"
-                      style={{ WebkitTapHighlightColor: "transparent" }}
-                      aria-label="Open photo"
-                      title="Open photo"
-                    >
-                      <div
-                        className="overflow-hidden"
-                        style={{
-                          width: 54,
-                          height: 54,
-                          borderRadius: 12,
-                          border: active
-                            ? "2px solid rgba(0,0,0,0.82)"
-                            : "1px solid rgba(0,0,0,0.12)",
-                          background: "rgba(0,0,0,0.04)",
-                        }}
-                      >
-                        <img
-                          src={m.thumbnailUrl || mUrl}
-                          alt=""
-                          className="w-full h-full object-cover"
-                          decoding="async"
-                          draggable={false}
-                        />
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* BOTTOM BAR (controls + info): share / info / delete */}
-          {showBottomBar && (
-            <div
-              className="absolute left-0 right-0 bottom-0 z-[180] pb-5 flex justify-center"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div
-                className="h-12 px-5 rounded-[999px] flex items-center gap-7"
-                style={{
-                  background: "rgba(255,255,255,0.92)",
-                  border: "1px solid rgba(0,0,0,0.10)",
-                  backdropFilter: "blur(14px)",
-                }}
-              >
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleShare();
-                  }}
-                  className="w-9 h-9 grid place-items-center"
-                  aria-label="Share"
-                >
-                  <Share2
-                    className="w-5 h-5"
-                    style={{ color: "rgba(0,0,0,0.82)" }}
-                  />
-                </button>
-
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setViewMode((m) => (m === "info" ? "controls" : "info"));
-                    setIsAddPinMode(false);
-                    setSelectedPinId(null);
-                  }}
-                  className="w-9 h-9 grid place-items-center rounded-full"
-                  aria-label="Info"
-                  style={{ background: isInfo ? "rgba(0,0,0,0.08)" : "transparent" }}
-                >
-                  <Info
-                    className="w-5 h-5"
-                    style={{ color: "rgba(0,0,0,0.82)" }}
-                  />
-                </button>
-
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete();
-                  }}
-                  className="w-9 h-9 grid place-items-center"
-                  aria-label="Delete"
-                >
-                  <Trash2
-                    className="w-5 h-5"
-                    style={{ color: "rgba(220,38,38,0.92)" }}
-                  />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        <button onClick={handleDelete}>
+          <Trash2 className="w-5 h-5 text-red-600" />
+        </button>
+      </div>
+    </div>
+  )}
+</div>
 
         {/* NOTES SHEET — always mounted; floats up via transform */}
         {!isEmbedded && (
