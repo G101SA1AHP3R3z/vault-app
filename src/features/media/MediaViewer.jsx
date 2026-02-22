@@ -50,7 +50,7 @@ export default function MediaViewer({
   const isEmbedded = mode === "embedded";
 
   /**
-   * - immersive: black bg, chrome hidden (BUT space reserved so photo never jumps)
+   * - immersive: black bg, chrome hidden (layout reserved so photo never jumps)
    * - controls: light bg, chrome visible, filmstrip visible
    * - info: light bg, chrome visible (i selected), filmstrip hidden, notes sheet up
    */
@@ -63,7 +63,6 @@ export default function MediaViewer({
 
   const stageRef = useRef(null);
 
-  // Always pass a usable url into MediaStage
   const stageMedia = useMemo(() => {
     const url = resolveMediaUrl(media);
     return media ? { ...media, url } : media;
@@ -92,12 +91,17 @@ export default function MediaViewer({
 
   const bg = isImmersive ? "#000000" : "#FFFEFA";
 
-  // Notes view look (photo fills top half, slight zoom, edge-to-edge)
-  const imgZoom = isInfo ? 1.05 : 1.0;
-  const fitMode = isInfo ? "cover" : "contain";
-  const clipBottom = "0px"; // do not clip; we size the stage area instead
+  // ✅ REMOVE side gaps: use COVER whenever chrome is visible.
+  // Immersive stays "contain" (classic photos viewer feel).
+  const fitMode = isImmersive ? "contain" : "cover";
 
-  // Pins: only show in info after user selects one (and not while placing)
+  // Subtle zoom in light modes eliminates hairline gaps + matches iOS “scale a bit”
+  const imgZoom = isImmersive ? 1.0 : isInfo ? 1.05 : 1.02;
+
+  // We do NOT clip anymore; we size the stage box instead
+  const clipBottom = "0px";
+
+  // Pins: only show in info after selecting one (and not while placing)
   const showPins = isInfo && !!selectedPinId && !isAddPinMode;
 
   const accent = palette?.accent || "rgba(255,77,46,0.95)";
@@ -127,7 +131,7 @@ export default function MediaViewer({
         stageMedia?.sessionId,
         stageMedia?.id,
         pinDraft.id,
-        { note: nextText }
+        { note: nextText },
       );
     } catch (err) {
       console.error("Failed to update pin note", err);
@@ -205,27 +209,26 @@ export default function MediaViewer({
   const Outer = ({ children }) => {
     if (isEmbedded) return <div className="w-full relative">{children}</div>;
     return (
-      <div
-        className="fixed inset-0 z-[100]"
-        style={{ background: bg, overscrollBehavior: "contain" }}
-      >
+      <div className="fixed inset-0 z-[100]" style={{ background: bg, overscrollBehavior: "contain" }}>
         {children}
       </div>
     );
   };
 
-  // ✅ THE NO-JUMP RULE:
-  // Always reserve the exact same chrome space, regardless of mode.
-  // We only fade chrome in/out (opacity/transform), never add/remove layout padding.
+  // Reserve chrome space ALWAYS so photo never jumps
   const TOP_H = 64;
   const BOTTOM_H = 88;
-  const STRIP_H = filmstrip.length > 0 ? 78 : 0;
+  const STRIP_H = filmstrip.length > 0 ? 64 : 0; // ✅ slightly smaller reserved strip height
 
   const chromeVisible = !isImmersive;
-  const stripVisible = isControls; // only in controls
+  const stripVisible = isControls;
 
-  // In info mode, the stage box becomes top-half (like iOS)
+  // Notes mode: stage becomes top-half like iOS
   const stageBoxHeight = isInfo ? `calc(50vh - ${TOP_H}px)` : "100%";
+
+  // ✅ Smaller thumbnails
+  const THUMB = 44;
+  const THUMB_RADIUS = 10;
 
   return (
     <Outer>
@@ -237,7 +240,7 @@ export default function MediaViewer({
           overflow: "hidden",
         }}
       >
-        {/* STAGE AREA — reserved padding ALWAYS (prevents photo jump) */}
+        {/* STAGE AREA — reserved padding ALWAYS (prevents jump) */}
         <div
           className="h-full w-full"
           style={{
@@ -286,7 +289,7 @@ export default function MediaViewer({
           </div>
         </div>
 
-        {/* TOP NAV — fades in/out, but space is always reserved */}
+        {/* TOP NAV */}
         {!isEmbedded && (
           <div
             className="absolute top-0 left-0 right-0 z-[300] pointer-events-none"
@@ -319,7 +322,7 @@ export default function MediaViewer({
           </div>
         )}
 
-        {/* FILMSTRIP — lives inside reserved strip area (never affects stage size) */}
+        {/* FILMSTRIP */}
         {!isEmbedded && filmstrip.length > 0 && (
           <div
             className="absolute left-0 right-0 z-[290] px-4"
@@ -349,7 +352,6 @@ export default function MediaViewer({
                     onClick={(e) => {
                       e.stopPropagation();
                       onSelectMedia?.({ ...m, url: mUrl });
-                      // important: do NOT change viewMode here
                     }}
                     className="shrink-0"
                     style={{ WebkitTapHighlightColor: "transparent" }}
@@ -358,9 +360,9 @@ export default function MediaViewer({
                   >
                     <div
                       style={{
-                        width: 54,
-                        height: 54,
-                        borderRadius: 12,
+                        width: THUMB,
+                        height: THUMB,
+                        borderRadius: THUMB_RADIUS,
                         overflow: "hidden",
                         border: active
                           ? "2px solid rgba(0,0,0,0.85)"
@@ -383,7 +385,7 @@ export default function MediaViewer({
           </div>
         )}
 
-        {/* BOTTOM BAR — fades in/out, but space is always reserved */}
+        {/* BOTTOM BAR */}
         {!isEmbedded && (
           <div
             className="absolute left-0 right-0 bottom-0 z-[300] pb-5 flex justify-center pointer-events-none"
@@ -453,7 +455,7 @@ export default function MediaViewer({
               left: 0,
               right: 0,
               bottom: 0,
-              zIndex: 200, // below top/bottom chrome (300)
+              zIndex: 200,
               background: "#FFFEFA",
               borderTop: "1px solid rgba(0,0,0,0.08)",
               minHeight: "50vh",
