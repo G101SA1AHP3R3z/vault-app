@@ -50,11 +50,11 @@ export default function MediaViewer({
   const isEmbedded = mode === "embedded";
 
   /**
-   * - immersive: black bg, chrome hidden (layout reserved so photo never jumps)
-   * - controls: light bg, chrome visible, filmstrip visible
-   * - info: light bg, chrome visible (i selected), filmstrip hidden, notes sheet up
+   * Removed dark/immersive mode.
+   * - controls: light bg, nav + filmstrip + bottom bar
+   * - info: light bg, nav + bottom bar (i selected), notes sheet up, filmstrip hidden
    */
-  const [viewMode, setViewMode] = useState("immersive"); // "immersive" | "controls" | "info"
+  const [viewMode, setViewMode] = useState("controls"); // "controls" | "info"
   const [isAddPinMode, setIsAddPinMode] = useState(false);
   const [selectedPinId, setSelectedPinId] = useState(null);
 
@@ -77,7 +77,6 @@ export default function MediaViewer({
     return currentHotspots.find((h) => h.id === selectedPinId) || null;
   }, [selectedPinId, currentHotspots]);
 
-  // Do NOT reset viewMode when changing media (keeps light mode while browsing filmstrip)
   useEffect(() => {
     setSelectedPinId(null);
     setIsAddPinMode(false);
@@ -87,21 +86,16 @@ export default function MediaViewer({
 
   const isInfo = viewMode === "info";
   const isControls = viewMode === "controls";
-  const isImmersive = viewMode === "immersive";
 
-  const bg = isImmersive ? "#000000" : "#FFFEFA";
+  // Always light now
+  const bg = "#FFFEFA";
 
-  // ✅ FULL WIDTH IN BLACK MODE TOO:
-  // "cover" always = edge-to-edge in every mode (will crop slightly depending on aspect).
+  // Edge-to-edge photo (no side gaps): cover
   const fitMode = "cover";
+  const imgZoom = isInfo ? 1.05 : 1.02;
 
-  // Tiny zoom removes hairline edges (esp Safari)
-  const imgZoom = isImmersive ? 1.01 : isInfo ? 1.05 : 1.02;
-
-  // We do NOT clip anymore; we size the stage box instead
   const clipBottom = "0px";
 
-  // Pins: only show in info after selecting one (and not while placing)
   const showPins = isInfo && !!selectedPinId && !isAddPinMode;
 
   const accent = palette?.accent || "rgba(255,77,46,0.95)";
@@ -191,14 +185,6 @@ export default function MediaViewer({
     }
   };
 
-  // Tap photo toggles immersive <-> controls ONLY (not info)
-  const handleStageTapToggle = () => {
-    if (isEmbedded) return;
-    if (pinOpen) return;
-    if (isInfo) return;
-    setViewMode((m) => (m === "immersive" ? "controls" : "immersive"));
-  };
-
   const filmstrip = useMemo(() => {
     const list = Array.isArray(moreFromSession)
       ? moreFromSession.filter((m) => resolveMediaUrl(m))
@@ -209,26 +195,31 @@ export default function MediaViewer({
   const Outer = ({ children }) => {
     if (isEmbedded) return <div className="w-full relative">{children}</div>;
     return (
-      <div className="fixed inset-0 z-[100]" style={{ background: bg, overscrollBehavior: "contain" }}>
+      <div
+        className="fixed inset-0 z-[100]"
+        style={{ background: bg, overscrollBehavior: "contain" }}
+      >
         {children}
       </div>
     );
   };
 
-  // Reserve chrome space ALWAYS so photo never jumps
+  // Layout constants
   const TOP_H = 64;
   const BOTTOM_H = 88;
-  const STRIP_H = filmstrip.length > 0 ? 64 : 0;
 
-  const chromeVisible = !isImmersive;
-  const stripVisible = isControls;
+  // Filmstrip sizing
+  const STRIP_H = filmstrip.length > 0 ? 56 : 0; // slightly smaller
+  const STRIP_GAP = filmstrip.length > 0 ? 10 : 0; // ✅ at least 8px gap (using 10px)
 
-  // Notes mode: stage becomes top-half like iOS
+  const stripVisible = isControls && filmstrip.length > 0;
+
+  // Notes mode: photo becomes top half
   const stageBoxHeight = isInfo ? `calc(50vh - ${TOP_H}px)` : "100%";
 
-  // Smaller thumbnails
+  // Thumbs: smaller + reduced radius
   const THUMB = 44;
-  const THUMB_RADIUS = 10;
+  const THUMB_RADIUS = 7; // ✅ reduced
 
   return (
     <Outer>
@@ -240,15 +231,12 @@ export default function MediaViewer({
           overflow: "hidden",
         }}
       >
-        {/* STAGE AREA — reserved padding ALWAYS (prevents jump) */}
+        {/* STAGE AREA — reserved padding ALWAYS */}
         <div
           className="h-full w-full"
           style={{
             paddingTop: TOP_H,
-            paddingBottom: BOTTOM_H + STRIP_H,
-          }}
-          onClick={() => {
-            if (!isInfo) handleStageTapToggle();
+            paddingBottom: BOTTOM_H + STRIP_H + STRIP_GAP, // ✅ adds space between photo and strip
           }}
         >
           <div className="relative w-full h-full">
@@ -289,13 +277,13 @@ export default function MediaViewer({
           </div>
         </div>
 
-        {/* TOP NAV */}
+        {/* TOP NAV — always visible now */}
         {!isEmbedded && (
           <div
-            className="absolute top-0 left-0 right-0 z-[300] pointer-events-none"
+            className="absolute top-0 left-0 right-0 z-[300]"
             style={{
-              opacity: chromeVisible ? 1 : 0,
-              transform: chromeVisible ? "translateY(0px)" : "translateY(-6px)",
+              opacity: 1,
+              transform: "translateY(0px)",
               transition: `opacity 220ms ${EASE_IOS}, transform 220ms ${EASE_IOS}`,
               willChange: "opacity, transform",
             }}
@@ -306,14 +294,17 @@ export default function MediaViewer({
                   e.stopPropagation();
                   onBack?.();
                 }}
-                className="pointer-events-auto w-10 h-10 rounded-[10px] grid place-items-center"
+                className="w-10 h-10 rounded-[10px] grid place-items-center"
                 style={{
                   background: "rgba(255,255,255,0.95)",
                   border: "1px solid rgba(0,0,0,0.10)",
                 }}
                 aria-label="Back"
               >
-                <ChevronLeft className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
+                <ChevronLeft
+                  className="w-5 h-5"
+                  style={{ color: "rgba(0,0,0,0.82)" }}
+                />
               </button>
 
               <div className="flex-1" />
@@ -322,12 +313,12 @@ export default function MediaViewer({
           </div>
         )}
 
-        {/* FILMSTRIP */}
+        {/* FILMSTRIP — with explicit gap from photo (via paddingBottom + bottom placement) */}
         {!isEmbedded && filmstrip.length > 0 && (
           <div
             className="absolute left-0 right-0 z-[290] px-4"
             style={{
-              bottom: BOTTOM_H + 8,
+              bottom: BOTTOM_H + STRIP_GAP, // ✅ keep it below the photo by the same gap
               height: STRIP_H,
               display: "flex",
               alignItems: "center",
@@ -339,7 +330,10 @@ export default function MediaViewer({
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="w-full flex gap-2 overflow-x-auto hide-scrollbar" style={{ WebkitOverflowScrolling: "touch" }}>
+            <div
+              className="w-full flex gap-2 overflow-x-auto hide-scrollbar"
+              style={{ WebkitOverflowScrolling: "touch" }}
+            >
               {filmstrip.map((m) => {
                 const mUrl = resolveMediaUrl(m);
                 const active = m.id === stageMedia?.id;
@@ -349,6 +343,7 @@ export default function MediaViewer({
                     onClick={(e) => {
                       e.stopPropagation();
                       onSelectMedia?.({ ...m, url: mUrl });
+                      // keep current mode (no switching)
                     }}
                     className="shrink-0"
                     style={{ WebkitTapHighlightColor: "transparent" }}
@@ -359,9 +354,11 @@ export default function MediaViewer({
                       style={{
                         width: THUMB,
                         height: THUMB,
-                        borderRadius: THUMB_RADIUS,
+                        borderRadius: THUMB_RADIUS, // ✅ reduced radius
                         overflow: "hidden",
-                        border: active ? "2px solid rgba(0,0,0,0.85)" : "1px solid rgba(0,0,0,0.12)",
+                        border: active
+                          ? "2px solid rgba(0,0,0,0.85)"
+                          : "1px solid rgba(0,0,0,0.12)",
                         background: "rgba(0,0,0,0.04)",
                       }}
                     >
@@ -380,28 +377,38 @@ export default function MediaViewer({
           </div>
         )}
 
-        {/* BOTTOM BAR */}
+        {/* BOTTOM BAR — always visible */}
         {!isEmbedded && (
           <div
-            className="absolute left-0 right-0 bottom-0 z-[300] pb-5 flex justify-center pointer-events-none"
+            className="absolute left-0 right-0 bottom-0 z-[300] pb-5 flex justify-center"
+            onClick={(e) => e.stopPropagation()}
             style={{
-              opacity: chromeVisible ? 1 : 0,
-              transform: chromeVisible ? "translateY(0px)" : "translateY(10px)",
+              opacity: 1,
+              transform: "translateY(0px)",
               transition: `opacity 220ms ${EASE_IOS}, transform 220ms ${EASE_IOS}`,
               willChange: "opacity, transform",
             }}
-            onClick={(e) => e.stopPropagation()}
           >
             <div
-              className="pointer-events-auto h-12 px-5 rounded-[999px] flex items-center gap-7"
+              className="h-12 px-5 rounded-[999px] flex items-center gap-7"
               style={{
                 background: "rgba(255,255,255,0.95)",
                 border: "1px solid rgba(0,0,0,0.10)",
                 backdropFilter: "blur(14px)",
               }}
             >
-              <button onClick={(e) => { e.stopPropagation(); handleShare(); }} className="w-9 h-9 grid place-items-center" aria-label="Share">
-                <Share2 className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleShare();
+                }}
+                className="w-9 h-9 grid place-items-center"
+                aria-label="Share"
+              >
+                <Share2
+                  className="w-5 h-5"
+                  style={{ color: "rgba(0,0,0,0.82)" }}
+                />
               </button>
 
               <button
@@ -413,13 +420,28 @@ export default function MediaViewer({
                 }}
                 className="w-9 h-9 grid place-items-center rounded-full"
                 aria-label="Info"
-                style={{ background: isInfo ? "rgba(255,255,255,0.16)" : "transparent" }}
+                style={{
+                  background: isInfo ? "rgba(0,0,0,0.08)" : "transparent",
+                }}
               >
-                <Info className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
+                <Info
+                  className="w-5 h-5"
+                  style={{ color: "rgba(0,0,0,0.82)" }}
+                />
               </button>
 
-              <button onClick={(e) => { e.stopPropagation(); handleDelete(); }} className="w-9 h-9 grid place-items-center" aria-label="Delete">
-                <Trash2 className="w-5 h-5" style={{ color: "rgba(220,38,38,0.92)" }} />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete();
+                }}
+                className="w-9 h-9 grid place-items-center"
+                aria-label="Delete"
+              >
+                <Trash2
+                  className="w-5 h-5"
+                  style={{ color: "rgba(220,38,38,0.92)" }}
+                />
               </button>
             </div>
           </div>
@@ -434,7 +456,7 @@ export default function MediaViewer({
               left: 0,
               right: 0,
               bottom: 0,
-              zIndex: 200,
+              zIndex: 200, // below top/bottom chrome
               background: "#FFFEFA",
               borderTop: "1px solid rgba(0,0,0,0.08)",
               minHeight: "50vh",
@@ -454,7 +476,15 @@ export default function MediaViewer({
                 style={{ color: "rgba(0,0,0,0.55)", fontFamily: headerFont }}
               >
                 <span>DETAILS</span>
-                <span style={{ width: 4, height: 4, borderRadius: 99, background: accent, opacity: 0.7 }} />
+                <span
+                  style={{
+                    width: 4,
+                    height: 4,
+                    borderRadius: 99,
+                    background: accent,
+                    opacity: 0.7,
+                  }}
+                />
                 <span style={{ letterSpacing: 0, fontWeight: 700 }}>Notes</span>
               </div>
             </div>
@@ -477,7 +507,12 @@ export default function MediaViewer({
               moreFromSession={[]}
               onSelectMedia={() => {}}
               onDeleteHotspot={(pinId) =>
-                onDeleteHotspot?.(project?.id, stageMedia?.sessionId, stageMedia?.id, pinId)
+                onDeleteHotspot?.(
+                  project?.id,
+                  stageMedia?.sessionId,
+                  stageMedia?.id,
+                  pinId
+                )
               }
             />
           </div>
