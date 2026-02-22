@@ -50,10 +50,9 @@ export default function MediaViewer({
   const isEmbedded = mode === "embedded";
 
   /**
-   * - immersive: black bg, no chrome visible (but layout reserved so photo never jumps)
-   * - controls: light bg, top nav + filmstrip + bottom bar
-   * - info: light bg, top nav + bottom bar stay (i selected), filmstrip hidden,
-   *         photo clipped to top half + notes sheet floats up
+   * - immersive: black bg, chrome hidden (BUT space reserved so photo never jumps)
+   * - controls: light bg, chrome visible, filmstrip visible
+   * - info: light bg, chrome visible (i selected), filmstrip hidden, notes sheet up
    */
   const [viewMode, setViewMode] = useState("immersive"); // "immersive" | "controls" | "info"
   const [isAddPinMode, setIsAddPinMode] = useState(false);
@@ -64,7 +63,7 @@ export default function MediaViewer({
 
   const stageRef = useRef(null);
 
-  // Ensure MediaStage always gets a usable url
+  // Always pass a usable url into MediaStage
   const stageMedia = useMemo(() => {
     const url = resolveMediaUrl(media);
     return media ? { ...media, url } : media;
@@ -79,7 +78,7 @@ export default function MediaViewer({
     return currentHotspots.find((h) => h.id === selectedPinId) || null;
   }, [selectedPinId, currentHotspots]);
 
-  // Do NOT reset viewMode on media change (keeps light mode while browsing filmstrip)
+  // Do NOT reset viewMode when changing media (keeps light mode while browsing filmstrip)
   useEffect(() => {
     setSelectedPinId(null);
     setIsAddPinMode(false);
@@ -91,15 +90,14 @@ export default function MediaViewer({
   const isControls = viewMode === "controls";
   const isImmersive = viewMode === "immersive";
 
-  // Force true black / true paper (no gray bleed)
   const bg = isImmersive ? "#000000" : "#FFFEFA";
 
-  // Float illusion: clip photo bottom half + slide sheet up
-  const clipBottom = isInfo ? "50vh" : "0px";
+  // Notes view look (photo fills top half, slight zoom, edge-to-edge)
   const imgZoom = isInfo ? 1.05 : 1.0;
   const fitMode = isInfo ? "cover" : "contain";
+  const clipBottom = "0px"; // do not clip; we size the stage area instead
 
-  // Pins only in info mode and only after selecting an annotation
+  // Pins: only show in info after user selects one (and not while placing)
   const showPins = isInfo && !!selectedPinId && !isAddPinMode;
 
   const accent = palette?.accent || "rgba(255,77,46,0.95)";
@@ -209,29 +207,25 @@ export default function MediaViewer({
     return (
       <div
         className="fixed inset-0 z-[100]"
-        style={{
-          background: bg,
-          overscrollBehavior: "contain",
-        }}
+        style={{ background: bg, overscrollBehavior: "contain" }}
       >
         {children}
       </div>
     );
   };
 
-  const showTopNavChrome = !isEmbedded;
-  const showBottomBarChrome = !isEmbedded;
-  const showFilmstripChrome = !isEmbedded && filmstrip.length > 0;
+  // ✅ THE NO-JUMP RULE:
+  // Always reserve the exact same chrome space, regardless of mode.
+  // We only fade chrome in/out (opacity/transform), never add/remove layout padding.
+  const TOP_H = 64;
+  const BOTTOM_H = 88;
+  const STRIP_H = filmstrip.length > 0 ? 78 : 0;
 
-  // ✅ Key fix for "photo jumps":
-  // We reserve the SAME top/bottom/filmstrip space in *all* modes, and simply fade chrome in/out.
-  const TOP_H = 64; // top chrome reserve
-  const BOTTOM_H = 88; // bottom pill reserve (safe padding)
-  const STRIP_H = showFilmstripChrome ? 78 : 0; // reserve filmstrip space if it exists
-
-  // Chrome visibility
   const chromeVisible = !isImmersive;
   const stripVisible = isControls; // only in controls
+
+  // In info mode, the stage box becomes top-half (like iOS)
+  const stageBoxHeight = isInfo ? `calc(50vh - ${TOP_H}px)` : "100%";
 
   return (
     <Outer>
@@ -243,7 +237,7 @@ export default function MediaViewer({
           overflow: "hidden",
         }}
       >
-        {/* MAIN STAGE AREA — padding reserved ALWAYS so the photo never reflows/jumps */}
+        {/* STAGE AREA — reserved padding ALWAYS (prevents photo jump) */}
         <div
           className="h-full w-full"
           style={{
@@ -255,37 +249,45 @@ export default function MediaViewer({
           }}
         >
           <div className="relative w-full h-full">
-            <MediaStage
-              isEmbedded={isEmbedded}
-              stageRef={stageRef}
-              media={stageMedia}
-              fit={fitMode}
-              imgZoom={imgZoom}
-              clipBottom={clipBottom}
-              isAddPinMode={isInfo ? isAddPinMode : false}
-              isFocusMode={false}
-              onClickToAddPin={(e) => {
-                if (isInfo && isAddPinMode) {
+            <div
+              className="relative w-full"
+              style={{
+                height: stageBoxHeight,
+                overflow: "hidden",
+              }}
+            >
+              <MediaStage
+                isEmbedded={isEmbedded}
+                stageRef={stageRef}
+                media={stageMedia}
+                fit={fitMode}
+                imgZoom={imgZoom}
+                clipBottom={clipBottom}
+                isAddPinMode={isInfo ? isAddPinMode : false}
+                isFocusMode={false}
+                onClickToAddPin={(e) => {
+                  if (isInfo && isAddPinMode) {
+                    e.stopPropagation();
+                    onClickToAddPin(e);
+                  }
+                }}
+                hotspots={showPins ? currentHotspots : []}
+                selectedPin={selectedPin}
+                palette={palette}
+                getDisplayXY={getDisplayXY}
+                showPins={showPins}
+                onPinPointerDown={(e, pin) => {
+                  e.preventDefault();
                   e.stopPropagation();
-                  onClickToAddPin(e);
-                }
-              }}
-              hotspots={showPins ? currentHotspots : []}
-              selectedPin={selectedPin}
-              palette={palette}
-              getDisplayXY={getDisplayXY}
-              showPins={showPins}
-              onPinPointerDown={(e, pin) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setSelectedPinId(pin?.id || null);
-              }}
-            />
+                  setSelectedPinId(pin?.id || null);
+                }}
+              />
+            </div>
           </div>
         </div>
 
-        {/* TOP NAV — fades in/out but space is already reserved, so no jump */}
-        {showTopNavChrome && (
+        {/* TOP NAV — fades in/out, but space is always reserved */}
+        {!isEmbedded && (
           <div
             className="absolute top-0 left-0 right-0 z-[300] pointer-events-none"
             style={{
@@ -308,10 +310,7 @@ export default function MediaViewer({
                 }}
                 aria-label="Back"
               >
-                <ChevronLeft
-                  className="w-5 h-5"
-                  style={{ color: "rgba(0,0,0,0.82)" }}
-                />
+                <ChevronLeft className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
               </button>
 
               <div className="flex-1" />
@@ -320,8 +319,8 @@ export default function MediaViewer({
           </div>
         )}
 
-        {/* FILMSTRIP — positioned inside reserved strip area (NOT over photo), only visible in controls */}
-        {showFilmstripChrome && (
+        {/* FILMSTRIP — lives inside reserved strip area (never affects stage size) */}
+        {!isEmbedded && filmstrip.length > 0 && (
           <div
             className="absolute left-0 right-0 z-[290] px-4"
             style={{
@@ -350,7 +349,7 @@ export default function MediaViewer({
                     onClick={(e) => {
                       e.stopPropagation();
                       onSelectMedia?.({ ...m, url: mUrl });
-                      // keep current view mode (no forced dark)
+                      // important: do NOT change viewMode here
                     }}
                     className="shrink-0"
                     style={{ WebkitTapHighlightColor: "transparent" }}
@@ -384,8 +383,8 @@ export default function MediaViewer({
           </div>
         )}
 
-        {/* BOTTOM BAR — fades in/out but always occupies reserved space so no jump */}
-        {showBottomBarChrome && (
+        {/* BOTTOM BAR — fades in/out, but space is always reserved */}
+        {!isEmbedded && (
           <div
             className="absolute left-0 right-0 bottom-0 z-[300] pb-5 flex justify-center pointer-events-none"
             style={{
@@ -412,10 +411,7 @@ export default function MediaViewer({
                 className="w-9 h-9 grid place-items-center"
                 aria-label="Share"
               >
-                <Share2
-                  className="w-5 h-5"
-                  style={{ color: "rgba(0,0,0,0.82)" }}
-                />
+                <Share2 className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
               </button>
 
               <button
@@ -431,10 +427,7 @@ export default function MediaViewer({
                   background: isInfo ? "rgba(0,0,0,0.08)" : "transparent",
                 }}
               >
-                <Info
-                  className="w-5 h-5"
-                  style={{ color: "rgba(0,0,0,0.82)" }}
-                />
+                <Info className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
               </button>
 
               <button
@@ -445,16 +438,13 @@ export default function MediaViewer({
                 className="w-9 h-9 grid place-items-center"
                 aria-label="Delete"
               >
-                <Trash2
-                  className="w-5 h-5"
-                  style={{ color: "rgba(220,38,38,0.92)" }}
-                />
+                <Trash2 className="w-5 h-5" style={{ color: "rgba(220,38,38,0.92)" }} />
               </button>
             </div>
           </div>
         )}
 
-        {/* NOTES SHEET — absolute overlay; floats up. Kept below top/bottom chrome via z-index. */}
+        {/* NOTES SHEET */}
         {!isEmbedded && (
           <div
             onClick={(e) => e.stopPropagation()}
@@ -463,7 +453,7 @@ export default function MediaViewer({
               left: 0,
               right: 0,
               bottom: 0,
-              zIndex: 200, // below top/bottom chrome (300), above stage
+              zIndex: 200, // below top/bottom chrome (300)
               background: "#FFFEFA",
               borderTop: "1px solid rgba(0,0,0,0.08)",
               minHeight: "50vh",
