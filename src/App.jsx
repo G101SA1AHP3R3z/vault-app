@@ -348,11 +348,13 @@ function VaultShell() {
     }
   }, [view, tab]);
 
-  const dashboardTitle = useMemo(() => {
-    if (tab === "graveyard") return "[ Archive ]";
-    if (tab === "vault") return "[ Settings ]";
-    return "[ Projects ]";
-  }, [tab]);
+// Replace your dashboardTitle useMemo with this:
+const dashboardTitle = useMemo(() => {
+  if (tab === "search") return "Search";
+  if (tab === "graveyard") return "Archive";
+  if (tab === "vault") return "Settings";
+  return "Projects";
+}, [tab]);
 
   const handleCreateProject = async ({ title, tags, note }) => {
     try {
@@ -559,51 +561,76 @@ function VaultShell() {
             />
 
             {/* DASHBOARD */}
-            {view === "dashboard" && (
-              <div className="pt-24 pb-28">
-                {/* Search bar */}
-                {tab === "search" ? (
-                  <div className="px-6">
-                    <div
-                      className="w-full px-4 py-3 rounded-[12px]"
-                      style={{
-                        background: "rgba(255,255,255,0.70)",
-                        border: `1px solid ${palette.line}`,
-                      }}
-                    >
-                      <input
-                        ref={searchInputRef}
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search projects or tags…"
-                        className="w-full bg-transparent outline-none text-sm"
-                        style={{ color: "rgba(0,0,0,0.78)" }}
-                      />
-                      <div className="text-[10px] mt-1" style={{ color: "rgba(0,0,0,0.40)" }}>
-                        Try a project name or a #tag
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
+{view === "dashboard" && (
+  <div className="pt-10 pb-28">
+    {/* SEARCH: title + box under it */}
+    {tab === "search" ? (
+      <div className="px-6">
+        {/* Title */}
+        <div className="pt-3 pb-3 flex items-center justify-between">
+          <div
+            className="text-[32px] font-semibold"
+            style={{ color: "rgba(0,0,0,0.86)", letterSpacing: "-0.01em" }}
+          >
+            Search
+          </div>
+          <div className="w-12" />
+        </div>
 
-                {tab === "vault" ? (
-                  <Settings headerFont={headerFont} palette={palette} />
-                ) : (
-                  <LibraryGrid
-                    title={dashboardTitle}
-                    onQuickAdd={(project) => {
-                      setActiveProject(project);
-                      setView("project");
-                      setPrefillSessionId(null);
-                      setPrefillSessionTitle("New Session");
-                      setAutoPromptMediaPicker(false);
-                      setMediaOpen(true);
-                    }}
-                    onNew={() => setNewOpen(true)}
-                  />
-                )}
-              </div>
-            )}
+        {/* Search box directly under title */}
+        <div
+          className="w-full px-4 py-3 rounded-[12px]"
+          style={{
+            background: "rgba(255,255,255,0.70)",
+            border: `1px solid ${palette.line}`,
+          }}
+        >
+          <input
+            ref={searchInputRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search projects or tags…"
+            className="w-full bg-transparent outline-none text-sm"
+            style={{ color: "rgba(0,0,0,0.78)" }}
+          />
+          <div className="text-[10px] mt-1" style={{ color: "rgba(0,0,0,0.40)" }}>
+            Try a project name or a #tag
+          </div>
+        </div>
+
+        {/* Results (small label, aligned with Search title) */}
+        <div className="mt-6">
+          <div
+            className="text-[12px] font-semibold uppercase tracking-wide"
+            style={{ color: "rgba(0,0,0,0.55)" }}
+          >
+            Results
+          </div>
+
+          {/* Grid */}
+          <div className="mt-3">
+            <LibraryGrid title="" onNew={null} />
+          </div>
+        </div>
+      </div>
+    ) : tab === "vault" ? (
+      <Settings headerFont={headerFont} palette={palette} />
+    ) : (
+      <LibraryGrid
+        title={dashboardTitle}
+        onQuickAdd={(project) => {
+          setActiveProject(project);
+          setView("project");
+          setPrefillSessionId(null);
+          setPrefillSessionTitle("New Session");
+          setAutoPromptMediaPicker(false);
+          setMediaOpen(true);
+        }}
+        onNew={() => setNewOpen(true)}
+      />
+    )}
+  </div>
+)}
 
             {/* PROJECT PAGE */}
             {view === "project" && activeProject && (

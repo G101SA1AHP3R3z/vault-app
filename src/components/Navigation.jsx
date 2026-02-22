@@ -2,95 +2,99 @@ import React from "react";
 import { Archive, Settings, Search } from "lucide-react";
 
 function LibraryMark({ active }) {
-  // 3 vertical bars icon (like your screenshot)
-  const color = active ? "rgba(255,77,46,0.95)" : "rgba(0,0,0,0.45)";
+  // 3 vertical bars icon (your "Index" library mark)
+  const color = active ? "rgba(0,0,0,0.82)" : "rgba(0,0,0,0.38)";
   return (
     <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
       <rect x="4" y="4" width="2.6" height="12" rx="1.3" fill={color} />
-      <rect x="8.7" y="4" width="2.6" height="12" rx="1.3" fill={color} opacity="0.75" />
-      <rect x="13.4" y="4" width="2.6" height="12" rx="1.3" fill={color} opacity="0.55" />
+      <rect x="8.7" y="4" width="2.6" height="12" rx="1.3" fill={color} opacity="0.78" />
+      <rect x="13.4" y="4" width="2.6" height="12" rx="1.3" fill={color} opacity="0.60" />
     </svg>
   );
 }
 
-function IconBtn({ active, onClick, children, label }) {
+function NavIconBtn({ active, label, onClick, children }) {
   return (
     <button
       onClick={onClick}
-      className="w-11 h-11 grid place-items-center rounded-[12px] active:scale-[0.98] transition-transform"
-      style={{ background: active ? "rgba(0,0,0,0.04)" : "transparent" }}
+      className="w-9 h-9 grid place-items-center rounded-full"
       aria-label={label}
       title={label}
+      style={{
+        background: active ? "rgba(0,0,0,0.08)" : "transparent",
+        transition: "background 180ms cubic-bezier(.16,1,.3,1), transform 180ms cubic-bezier(.16,1,.3,1)",
+      }}
+      onMouseDown={(e) => e.currentTarget.style.transform = "scale(0.98)"}
+      onMouseUp={(e) => e.currentTarget.style.transform = "scale(1)"}
+      onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
     >
       {children}
     </button>
   );
 }
 
-export default function Navigation({ currentTab, setTab }) {
-  const palette = {
-    line: "rgba(0,0,0,0.10)",
-    ink: "#0B0B0C",
-  };
-
-  const isActive = (id) => currentTab === id;
+export default function Navigation({
+  tab,
+  onTabChange,
+  // keeping these props so App.jsx doesn't break, but we intentionally do NOT render a top bar
+  title,
+  onBack,
+}) {
+  const isActive = (id) => tab === id;
 
   return (
     <>
-      {/* MOBILE FLOATING NAV (matches screenshot) */}
-      <div className="md:hidden fixed bottom-8 inset-x-0 z-50 pointer-events-none">
-        <div className="max-w-md mx-auto px-6 flex items-end justify-between">
-          {/* Left pill */}
-          <div
-            className="pointer-events-auto flex items-center gap-1 px-2 py-2"
-            style={{
-              borderRadius: 14,
-              background: "rgba(255,255,255,0.92)",
-              border: `1px solid ${palette.line}`,
-              boxShadow: "0 18px 45px -40px rgba(0,0,0,0.35)",
-              backdropFilter: "blur(18px)",
-            }}
+      {/* iOS Photos-ish bottom pill nav (matches MediaViewer pill style) */}
+      <div className="md:hidden fixed inset-x-0 bottom-0 z-50 pb-6 flex justify-center pointer-events-none">
+        <div
+          className="pointer-events-auto h-12 px-5 rounded-[999px] flex items-center gap-7"
+          style={{
+            background: "rgba(255,255,255,0.95)",
+            border: "1px solid rgba(0,0,0,0.10)",
+            backdropFilter: "blur(14px)",
+            boxShadow: "0 18px 45px -40px rgba(0,0,0,0.35)",
+          }}
+        >
+          <NavIconBtn
+            active={isActive("library")}
+            label="Projects"
+            onClick={() => onTabChange?.("library")}
           >
-            {/* Library */}
-            <IconBtn active={isActive("library")} onClick={() => setTab("library")} label="Library">
-              <LibraryMark active={isActive("library")} />
-            </IconBtn>
+            <LibraryMark active={isActive("library")} />
+          </NavIconBtn>
 
-            {/* Archive (maps to your existing 'graveyard' tab) */}
-            <IconBtn active={isActive("graveyard")} onClick={() => setTab("graveyard")} label="Archive">
-              <Archive
-                className="w-5 h-5"
-                style={{ color: isActive("graveyard") ? palette.ink : "rgba(0,0,0,0.45)" }}
-              />
-            </IconBtn>
-
-            {/* Settings (keeping tab id as 'vault' so your app doesn't break) */}
-            <IconBtn active={isActive("vault")} onClick={() => setTab("vault")} label="Settings">
-              <Settings
-                className="w-5 h-5"
-                style={{ color: isActive("vault") ? palette.ink : "rgba(0,0,0,0.45)" }}
-              />
-            </IconBtn>
-          </div>
-
-          {/* Right floating search button */}
-          <button
-            onClick={() => setTab("search")}
-            className="pointer-events-auto w-12 h-12 grid place-items-center rounded-[14px] active:scale-[0.98] transition-transform"
-            style={{
-              background: "rgba(255,255,255,0.92)",
-              border: `1px solid ${palette.line}`,
-              boxShadow: "0 18px 45px -40px rgba(0,0,0,0.35)",
-              backdropFilter: "blur(18px)",
-            }}
-            aria-label="Search"
-            title="Search"
+          <NavIconBtn
+            active={isActive("search")}
+            label="Search"
+            onClick={() => onTabChange?.("search")}
           >
             <Search
               className="w-5 h-5"
-              style={{ color: isActive("search") ? palette.ink : "rgba(0,0,0,0.45)" }}
+              style={{ color: isActive("search") ? "rgba(0,0,0,0.82)" : "rgba(0,0,0,0.38)" }}
             />
-          </button>
+          </NavIconBtn>
+
+          <NavIconBtn
+            active={isActive("graveyard")}
+            label="Archive"
+            onClick={() => onTabChange?.("graveyard")}
+          >
+            <Archive
+              className="w-5 h-5"
+              style={{ color: isActive("graveyard") ? "rgba(0,0,0,0.82)" : "rgba(0,0,0,0.38)" }}
+            />
+          </NavIconBtn>
+
+          <NavIconBtn
+            active={isActive("vault")}
+            label="Settings"
+            onClick={() => onTabChange?.("vault")}
+          >
+            <Settings
+              className="w-5 h-5"
+              style={{ color: isActive("vault") ? "rgba(0,0,0,0.82)" : "rgba(0,0,0,0.38)" }}
+            />
+          </NavIconBtn>
         </div>
       </div>
     </>

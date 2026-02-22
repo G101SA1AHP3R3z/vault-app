@@ -84,7 +84,6 @@ function SectionHeader({ title, right }) {
   );
 }
 
-
 function ContinueCard({ project, onOpen, palette }) {
   const dateText = formatProjectDate(project?.createdAt);
 
@@ -190,18 +189,16 @@ function ProjectTile({ project, onOpen, palette }) {
   );
 }
 
-export default function LibraryGrid({ onNew }) {
+export default function LibraryGrid({ title = "Projects", onNew }) {
   const { filteredProjects, setActiveProject, setView } = useVault();
 
-const palette = {
-  ink: "#0B0B0C",
-  paper: "#FFFEFA",
-  line: "rgba(0,0,0,0.12)",
-  muted: "rgba(0,0,0,0.50)",
-  cta: "#C1EF1B",
-orange: "#FF4D2E",
-
-};
+  const palette = {
+    ink: "#0B0B0C",
+    paper: "#FFFEFA",
+    line: "rgba(0,0,0,0.12)",
+    muted: "rgba(0,0,0,0.50)",
+    orange: "#FF4D2E",
+  };
 
   const [recents, setRecents] = useState(() => readRecents());
   const projects = useMemo(() => filteredProjects || [], [filteredProjects]);
@@ -222,34 +219,41 @@ orange: "#FF4D2E",
     setRecents(readRecents());
   };
 
+  const showHeader = typeof title === "string" ? title.trim().length > 0 : !!title;
 
   return (
-    <div className="w-full pb-32 animate-in fade-in duration-300" style={{ background: palette.paper }}>
-{/* Header */}
-<div className="px-6 pt-7 pb-4 flex items-center justify-between">
-  <div
-    className="text-[32px] font-semibold"
-    style={{ color: palette.ink, letterSpacing: "-0.01em" }}
-  >
-    Projects
-  </div>
+    <div
+      className="w-full pb-32 animate-in fade-in duration-300"
+      style={{ background: palette.paper }}
+    >
+      {/* Header (only render if title is non-empty) */}
+      {showHeader ? (
+        <div className="px-6 pt-3 pb-3 flex items-center justify-between">
+          <div
+            className="text-[32px] font-semibold"
+            style={{ color: palette.ink, letterSpacing: "-0.01em" }}
+          >
+            {title}
+          </div>
 
- <button
-  onClick={() => onNew?.()}
-  className="text-[13px] font-semibold"
-  style={{
-    color: palette.orange,                 // your signature orange
-    WebkitTapHighlightColor: "transparent",
-  }}
-  aria-label="Create new project"
-  title="New project"
->
-  + New
-</button>
-
-
-</div>
-
+          {onNew ? (
+            <button
+              onClick={() => onNew?.()}
+              className="text-[13px] font-semibold"
+              style={{
+                color: palette.orange,
+                WebkitTapHighlightColor: "transparent",
+              }}
+              aria-label="Create new project"
+              title="New project"
+            >
+              + New
+            </button>
+          ) : (
+            <div className="w-12" />
+          )}
+        </div>
+      ) : null}
 
       <div className="px-6">
         {/* Continue */}
