@@ -4,6 +4,7 @@ import { ChevronLeft, Info, Share2, Trash2 } from "lucide-react";
 import MediaStage from "./components/MediaStage";
 import PinNotesPanel from "./components/PinNotesPanel";
 import PinEditorModal from "../../components/PinEditorModal";
+import useSwipeNav from "./hooks/useSwipeNav";
 
 const EASE_IOS = "cubic-bezier(.16,1,.3,1)";
 const INFO_DUR = 420;
@@ -33,6 +34,13 @@ export default function MediaViewer({
   headerFont,
   palette,
 
+  // navigation (project-wide)
+  mediaIndex = 0,
+  mediaCount = 1,
+  onPrev,
+  onNext,
+  onSwipeDown,
+
   moreFromSession = [],
   onSelectMedia,
 
@@ -50,11 +58,11 @@ export default function MediaViewer({
   const isEmbedded = mode === "embedded";
 
   /**
-   * Removed dark/immersive mode.
-   * - controls: light bg, nav + filmstrip + bottom bar
-   * - info: light bg, nav + bottom bar (i selected), notes sheet up, filmstrip hidden
+   * - immersive: black bg, chrome hidden (BUT space reserved so photo never jumps)
+   * - controls: light bg, chrome visible, filmstrip visible
+   * - info: light bg, chrome visible (i selected), filmstrip hidden, notes sheet up
    */
-  const [viewMode, setViewMode] = useState("controls"); // "controls" | "info"
+  const [viewMode, setViewMode] = useState("immersive"); // "immersive" | "controls" | "info"
   const [isAddPinMode, setIsAddPinMode] = useState(false);
   const [selectedPinId, setSelectedPinId] = useState(null);
 
@@ -62,7 +70,9 @@ export default function MediaViewer({
   const [pinDraft, setPinDraft] = useState(null);
 
   const stageRef = useRef(null);
+  const carouselRef = useRef(null);
 
+  // Always pass a usable url into MediaStage
   const stageMedia = useMemo(() => {
     const url = resolveMediaUrl(media);
     return media ? { ...media, url } : media;
@@ -77,6 +87,7 @@ export default function MediaViewer({
     return currentHotspots.find((h) => h.id === selectedPinId) || null;
   }, [selectedPinId, currentHotspots]);
 
+  // Do NOT reset viewMode when changing media (keeps light mode while browsing filmstrip)
   useEffect(() => {
     setSelectedPinId(null);
     setIsAddPinMode(false);
@@ -86,16 +97,16 @@ export default function MediaViewer({
 
   const isInfo = viewMode === "info";
   const isControls = viewMode === "controls";
+  const isImmersive = viewMode === "immersive";
 
-  // Always light now
-  const bg = "#FFFEFA";
+  const bg = isImmersive ? "#000000" : "#FFFEFA";
 
-  // Edge-to-edge photo (no side gaps): cover
-  const fitMode = "cover";
-  const imgZoom = isInfo ? 1.05 : 1.02;
+  // Notes view look (photo fills top half, slight zoom, edge-to-edge)
+  const imgZoom = isInfo ? 1.05 : 1.0;
+  const fitMode = isInfo ? "cover" : "contain";
+  const clipBottom = "0px"; // do not clip; we size the stage area instead
 
-  const clipBottom = "0px";
-
+  // Pins: only show in info after user selects one (and not while placing)
   const showPins = isInfo && !!selectedPinId && !isAddPinMode;
 
   const accent = palette?.accent || "rgba(255,77,46,0.95)";
@@ -185,6 +196,14 @@ export default function MediaViewer({
     }
   };
 
+  // Tap photo toggles immersive <-> controls ONLY (not info)
+  const handleStageTapToggle = () => {
+    if (isEmbedded) return;
+    if (pinOpen) return;
+    if (isInfo) return;
+    setViewMode((m) => (m === "immersive" ? "controls" : "immersive"));
+  };
+
   const filmstrip = useMemo(() => {
     const list = Array.isArray(moreFromSession)
       ? moreFromSession.filter((m) => resolveMediaUrl(m))
@@ -204,22 +223,38 @@ export default function MediaViewer({
     );
   };
 
-  // Layout constants
+  // ✅ THE NO-JUMP RULE:
+  // Always reserve the exact same chrome space, regardless of mode.
+  // We only fade chrome in/out (opacity/transform), never add/remove layout padding.
   const TOP_H = 64;
   const BOTTOM_H = 88;
+  const STRIP_H = filmstrip.length > 0 ? 78 : 0;
 
-  // Filmstrip sizing
-  const STRIP_H = filmstrip.length > 0 ? 56 : 0; // slightly smaller
-  const STRIP_GAP = filmstrip.length > 0 ? 10 : 0; // ✅ at least 8px gap (using 10px)
+  const chromeVisible = !isImmersive;
+  const stripVisible = isControls; // only in controls
 
-  const stripVisible = isControls && filmstrip.length > 0;
-
-  // Notes mode: photo becomes top half
+  // In info mode, the stage box becomes top-half (like iOS)
   const stageBoxHeight = isInfo ? `calc(50vh - ${TOP_H}px)` : "100%";
 
-  // Thumbs: smaller + reduced radius
-  const THUMB = 44;
-  const THUMB_RADIUS = 7; // ✅ reduced
+  // --- Swipe wiring (uses your hook) ---
+  const canPrev = mediaIndex > 0;
+  const canNext = mediaIndex < Math.max(0, mediaCount - 1);
+  const swipeEnabled = !isEmbedded;
+
+  const swipe = useSwipeNav({
+    enabled: swipeEnabled,
+    carouselRef,
+    stageRef,
+    onPrev,
+    onNext,
+    onSwipeDown,
+    // Block swipes when user is placing pins, editing, or in notes sheet
+    isBlocked: !!pinOpen || !!isAddPinMode || viewMode === "info",
+    canPrev,
+    canNext,
+    gapPx: 16,
+    animationMs: 280,
+  });
 
   return (
     <Outer>
@@ -231,12 +266,15 @@ export default function MediaViewer({
           overflow: "hidden",
         }}
       >
-        {/* STAGE AREA — reserved padding ALWAYS */}
+        {/* STAGE AREA — reserved padding ALWAYS (prevents photo jump) */}
         <div
           className="h-full w-full"
           style={{
             paddingTop: TOP_H,
-            paddingBottom: BOTTOM_H + STRIP_H + STRIP_GAP, // ✅ adds space between photo and strip
+            paddingBottom: BOTTOM_H + STRIP_H,
+          }}
+          onClick={() => {
+            if (!isInfo) handleStageTapToggle();
           }}
         >
           <div className="relative w-full h-full">
@@ -247,43 +285,59 @@ export default function MediaViewer({
                 overflow: "hidden",
               }}
             >
-              <MediaStage
-                isEmbedded={isEmbedded}
-                stageRef={stageRef}
-                media={stageMedia}
-                fit={fitMode}
-                imgZoom={imgZoom}
-                clipBottom={clipBottom}
-                isAddPinMode={isInfo ? isAddPinMode : false}
-                isFocusMode={false}
-                onClickToAddPin={(e) => {
-                  if (isInfo && isAddPinMode) {
-                    e.stopPropagation();
-                    onClickToAddPin(e);
-                  }
-                }}
-                hotspots={showPins ? currentHotspots : []}
-                selectedPin={selectedPin}
-                palette={palette}
-                getDisplayXY={getDisplayXY}
-                showPins={showPins}
-                onPinPointerDown={(e, pin) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setSelectedPinId(pin?.id || null);
-                }}
-              />
+              {/* Swipe surface + animated translate wrapper */}
+              <div
+                className="absolute inset-0"
+                style={{ touchAction: swipeEnabled ? "none" : "pan-y" }}
+                onPointerDown={swipe.onPointerDown}
+                onPointerMove={swipe.onPointerMove}
+                onPointerUp={swipe.onPointerEnd}
+                onPointerCancel={swipe.onPointerEnd}
+                onTouchStart={swipe.onPointerDown}
+                onTouchMove={swipe.onPointerMove}
+                onTouchEnd={swipe.onPointerEnd}
+                onTouchCancel={swipe.onPointerEnd}
+              >
+                <div ref={carouselRef} className="w-full h-full">
+                  <MediaStage
+                    isEmbedded={isEmbedded}
+                    stageRef={stageRef}
+                    media={stageMedia}
+                    fit={fitMode}
+                    imgZoom={imgZoom}
+                    clipBottom={clipBottom}
+                    isAddPinMode={isInfo ? isAddPinMode : false}
+                    isFocusMode={false}
+                    onClickToAddPin={(e) => {
+                      if (isInfo && isAddPinMode) {
+                        e.stopPropagation();
+                        onClickToAddPin(e);
+                      }
+                    }}
+                    hotspots={showPins ? currentHotspots : []}
+                    selectedPin={selectedPin}
+                    palette={palette}
+                    getDisplayXY={getDisplayXY}
+                    showPins={showPins}
+                    onPinPointerDown={(e, pin) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSelectedPinId(pin?.id || null);
+                    }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* TOP NAV — always visible now */}
+        {/* TOP NAV — fades in/out, but space is always reserved */}
         {!isEmbedded && (
           <div
-            className="absolute top-0 left-0 right-0 z-[300]"
+            className="absolute top-0 left-0 right-0 z-[300] pointer-events-none"
             style={{
-              opacity: 1,
-              transform: "translateY(0px)",
+              opacity: chromeVisible ? 1 : 0,
+              transform: chromeVisible ? "translateY(0px)" : "translateY(-6px)",
               transition: `opacity 220ms ${EASE_IOS}, transform 220ms ${EASE_IOS}`,
               willChange: "opacity, transform",
             }}
@@ -294,17 +348,14 @@ export default function MediaViewer({
                   e.stopPropagation();
                   onBack?.();
                 }}
-                className="w-10 h-10 rounded-[10px] grid place-items-center"
+                className="pointer-events-auto w-10 h-10 rounded-[10px] grid place-items-center"
                 style={{
                   background: "rgba(255,255,255,0.95)",
                   border: "1px solid rgba(0,0,0,0.10)",
                 }}
                 aria-label="Back"
               >
-                <ChevronLeft
-                  className="w-5 h-5"
-                  style={{ color: "rgba(0,0,0,0.82)" }}
-                />
+                <ChevronLeft className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
               </button>
 
               <div className="flex-1" />
@@ -313,12 +364,12 @@ export default function MediaViewer({
           </div>
         )}
 
-        {/* FILMSTRIP — with explicit gap from photo (via paddingBottom + bottom placement) */}
+        {/* FILMSTRIP — lives inside reserved strip area (never affects stage size) */}
         {!isEmbedded && filmstrip.length > 0 && (
           <div
             className="absolute left-0 right-0 z-[290] px-4"
             style={{
-              bottom: BOTTOM_H + STRIP_GAP, // ✅ keep it below the photo by the same gap
+              bottom: BOTTOM_H + 8,
               height: STRIP_H,
               display: "flex",
               alignItems: "center",
@@ -343,7 +394,7 @@ export default function MediaViewer({
                     onClick={(e) => {
                       e.stopPropagation();
                       onSelectMedia?.({ ...m, url: mUrl });
-                      // keep current mode (no switching)
+                      // important: do NOT change viewMode here
                     }}
                     className="shrink-0"
                     style={{ WebkitTapHighlightColor: "transparent" }}
@@ -352,9 +403,9 @@ export default function MediaViewer({
                   >
                     <div
                       style={{
-                        width: THUMB,
-                        height: THUMB,
-                        borderRadius: THUMB_RADIUS, // ✅ reduced radius
+                        width: 54,
+                        height: 54,
+                        borderRadius: 12,
                         overflow: "hidden",
                         border: active
                           ? "2px solid rgba(0,0,0,0.85)"
@@ -377,20 +428,20 @@ export default function MediaViewer({
           </div>
         )}
 
-        {/* BOTTOM BAR — always visible */}
+        {/* BOTTOM BAR — fades in/out, but space is always reserved */}
         {!isEmbedded && (
           <div
-            className="absolute left-0 right-0 bottom-0 z-[300] pb-5 flex justify-center"
-            onClick={(e) => e.stopPropagation()}
+            className="absolute left-0 right-0 bottom-0 z-[300] pb-5 flex justify-center pointer-events-none"
             style={{
-              opacity: 1,
-              transform: "translateY(0px)",
+              opacity: chromeVisible ? 1 : 0,
+              transform: chromeVisible ? "translateY(0px)" : "translateY(10px)",
               transition: `opacity 220ms ${EASE_IOS}, transform 220ms ${EASE_IOS}`,
               willChange: "opacity, transform",
             }}
+            onClick={(e) => e.stopPropagation()}
           >
             <div
-              className="h-12 px-5 rounded-[999px] flex items-center gap-7"
+              className="pointer-events-auto h-12 px-5 rounded-[999px] flex items-center gap-7"
               style={{
                 background: "rgba(255,255,255,0.95)",
                 border: "1px solid rgba(0,0,0,0.10)",
@@ -405,10 +456,7 @@ export default function MediaViewer({
                 className="w-9 h-9 grid place-items-center"
                 aria-label="Share"
               >
-                <Share2
-                  className="w-5 h-5"
-                  style={{ color: "rgba(0,0,0,0.82)" }}
-                />
+                <Share2 className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
               </button>
 
               <button
@@ -424,10 +472,7 @@ export default function MediaViewer({
                   background: isInfo ? "rgba(0,0,0,0.08)" : "transparent",
                 }}
               >
-                <Info
-                  className="w-5 h-5"
-                  style={{ color: "rgba(0,0,0,0.82)" }}
-                />
+                <Info className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
               </button>
 
               <button
@@ -438,10 +483,7 @@ export default function MediaViewer({
                 className="w-9 h-9 grid place-items-center"
                 aria-label="Delete"
               >
-                <Trash2
-                  className="w-5 h-5"
-                  style={{ color: "rgba(220,38,38,0.92)" }}
-                />
+                <Trash2 className="w-5 h-5" style={{ color: "rgba(220,38,38,0.92)" }} />
               </button>
             </div>
           </div>
@@ -456,7 +498,7 @@ export default function MediaViewer({
               left: 0,
               right: 0,
               bottom: 0,
-              zIndex: 200, // below top/bottom chrome
+              zIndex: 200, // below top/bottom chrome (300)
               background: "#FFFEFA",
               borderTop: "1px solid rgba(0,0,0,0.08)",
               minHeight: "50vh",
@@ -507,12 +549,7 @@ export default function MediaViewer({
               moreFromSession={[]}
               onSelectMedia={() => {}}
               onDeleteHotspot={(pinId) =>
-                onDeleteHotspot?.(
-                  project?.id,
-                  stageMedia?.sessionId,
-                  stageMedia?.id,
-                  pinId
-                )
+                onDeleteHotspot?.(project?.id, stageMedia?.sessionId, stageMedia?.id, pinId)
               }
             />
           </div>
