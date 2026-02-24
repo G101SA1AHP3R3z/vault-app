@@ -12,7 +12,6 @@ import Login from "./components/Login";
 import LibraryGrid from "./features/library/LibraryGrid";
 import MediaViewer from "./features/media/MediaViewer";
 import ProjectView from "./features/project/ProjectView";
-import Settings from "./features/settings/settings";
 import useProjectMediaNavigator from "./features/media/hooks/useProjectMediaNavigator";
 
 function formatDuration(sec) {
@@ -294,7 +293,6 @@ function VaultShell() {
     activeProject,
     setActiveProject,
 
-    // ✅ option 2
     mediaNotesById,
     upsertMediaNote,
 
@@ -325,6 +323,9 @@ function VaultShell() {
     uploadSessionVoiceNote,
     updateSessionVoiceTranscript,
     clearSessionVoiceNote,
+
+    // auth
+    signOutUser,
   } = useVault();
 
   const mediaNav = useProjectMediaNavigator(activeProject, deleteMediaFromProject);
@@ -340,21 +341,10 @@ function VaultShell() {
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voiceSession, setVoiceSession] = useState(null);
 
-  const searchInputRef = useRef(null);
-  useEffect(() => {
-    if (view === "dashboard" && tab === "search") {
-      const t = setTimeout(() => searchInputRef.current?.focus(), 120);
-      return () => clearTimeout(t);
-    }
-  }, [view, tab]);
-
-// Replace your dashboardTitle useMemo with this:
-const dashboardTitle = useMemo(() => {
-  if (tab === "search") return "Search";
-  if (tab === "graveyard") return "Archive";
-  if (tab === "vault") return "Settings";
-  return "Projects";
-}, [tab]);
+  const dashboardTitle = useMemo(() => {
+    if (tab === "graveyard") return "Archive";
+    return "Projects";
+  }, [tab]);
 
   const handleCreateProject = async ({ title, tags, note }) => {
     try {
@@ -390,8 +380,11 @@ const dashboardTitle = useMemo(() => {
     }
   };
 
-  const goBackFromProject = () => {
+  const goBackFromProject = () => setView("dashboard");
+
+  const goHome = () => {
     setView("dashboard");
+    setActiveProject(null);
   };
 
   const openAddPhotosForSession = (session) => {
@@ -553,84 +546,51 @@ const dashboardTitle = useMemo(() => {
       <div style={{ fontFamily: bodyFont, color: palette.ink }}>
         <div className="max-w-6xl mx-auto">
           <div className="relative">
-            <Navigation
-              title={view === "project" ? "" : dashboardTitle}
-              tab={tab}
-              onTabChange={(t) => setTab(t)}
-              onBack={view === "project" ? goBackFromProject : null}
-            />
+            {view === "dashboard" ? (
+              <Navigation
+                title="Index"
+                showSearch={true}
+                searchValue={search}
+                onSearchChange={(v) => setSearch(v)}
+                primaryLabel={tab === "graveyard" ? null : "New Project"}
+                onPrimary={() => setNewOpen(true)}
+                onHome={() => {
+                  setTab("library");
+                  goHome();
+                }}
+                menuItems={[
+                  {
+                    label: tab === "graveyard" ? "View projects" : "View archive",
+                    onClick: () => setTab(tab === "graveyard" ? "library" : "graveyard"),
+                  },
+                  {
+                    label: "Sign out",
+                    onClick: () => signOutUser?.(),
+                  },
+                ]}
+              />
+            ) : null}
 
             {/* DASHBOARD */}
-{view === "dashboard" && (
-  <div className="pt-10 pb-28">
-    {/* SEARCH: title + box under it */}
-    {tab === "search" ? (
-      <div className="px-6">
-        {/* Title */}
-        <div className="pt-3 pb-3 flex items-center justify-between">
-          <div
-            className="text-[32px] font-semibold"
-            style={{ color: "rgba(0,0,0,0.86)", letterSpacing: "-0.01em" }}
-          >
-            Search
-          </div>
-          <div className="w-12" />
-        </div>
+            {view === "dashboard" && (
+              <div className="pt-8 pb-28">
+                <div className="px-6">
+                  <div
+                    className="text-[28px] font-semibold"
+                    style={{ color: "rgba(0,0,0,0.86)", letterSpacing: "-0.01em" }}
+                  >
+                    {dashboardTitle}
+                  </div>
+                  <div className="mt-2 text-[12px]" style={{ color: "rgba(0,0,0,0.45)" }}>
+                    {tab === "graveyard" ? "Archived projects" : "Your projects"}
+                  </div>
+                </div>
 
-        {/* Search box directly under title */}
-        <div
-          className="w-full px-4 py-3 rounded-[12px]"
-          style={{
-            background: "rgba(255,255,255,0.70)",
-            border: `1px solid ${palette.line}`,
-          }}
-        >
-          <input
-            ref={searchInputRef}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search projects or tags…"
-            className="w-full bg-transparent outline-none text-sm"
-            style={{ color: "rgba(0,0,0,0.78)" }}
-          />
-          <div className="text-[10px] mt-1" style={{ color: "rgba(0,0,0,0.40)" }}>
-            Try a project name or a #tag
-          </div>
-        </div>
-
-        {/* Results (small label, aligned with Search title) */}
-        <div className="mt-6">
-          <div
-            className="text-[12px] font-semibold uppercase tracking-wide"
-            style={{ color: "rgba(0,0,0,0.55)" }}
-          >
-            Results
-          </div>
-
-          {/* Grid */}
-          <div className="mt-3">
-            <LibraryGrid title="" onNew={null} />
-          </div>
-        </div>
-      </div>
-    ) : tab === "vault" ? (
-      <Settings headerFont={headerFont} palette={palette} />
-    ) : (
-      <LibraryGrid
-        title={dashboardTitle}
-        onQuickAdd={(project) => {
-          setActiveProject(project);
-          setView("project");
-          setPrefillSessionId(null);
-          setPrefillSessionTitle("New Session");
-          setAutoPromptMediaPicker(false);
-          setMediaOpen(true);
-        }}
-        onNew={() => setNewOpen(true)}
-      />
-    )}
-  </div>
-)}
+                <div className="mt-6">
+                  <LibraryGrid title="" onNew={tab === "graveyard" ? null : () => setNewOpen(true)} />
+                </div>
+              </div>
+            )}
 
             {/* PROJECT PAGE */}
             {view === "project" && activeProject && (
@@ -677,7 +637,7 @@ const dashboardTitle = useMemo(() => {
                 onAddHotspot={addHotspotToMedia}
                 onUpdateHotspot={updateHotspotInMedia}
                 onDeleteHotspot={deleteHotspotFromMedia}
-                onUpdateMediaNote={upsertMediaNote} // ✅ Option 2 hook
+                onUpdateMediaNote={upsertMediaNote}
               />
             )}
 
