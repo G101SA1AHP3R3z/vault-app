@@ -374,48 +374,54 @@ export function VaultProvider({ children }) {
     });
   };
 
-  const updateSessionNotes = async (projectId, sessionId, notesText) => {
-    if (!user?.uid || !projectId || !sessionId) return;
-    const proj = projects.find((p) => p.id === projectId) || activeProject;
-    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+// VaultContext.jsx — replace updateSessionNotes with this
+const updateSessionNotes = async (projectId, sessionId, notesText) => {
+  if (!user?.uid || !projectId || !sessionId) return;
 
-    const text = (notesText || "").toString();
+  const proj = projects.find((p) => p.id === projectId) || activeProject;
+  if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
 
-    const projectRef = doc(db, "projects", projectId);
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(projectRef);
-      if (!snap.exists()) throw new Error("Project not found.");
-      const data = snap.data();
-      const sessions = safeArray(data.sessions).map((s) => ({ ...s }));
-      const idx = sessions.findIndex((s) => s?.id === sessionId);
-      if (idx < 0) throw new Error("Session not found.");
+  const text = (notesText || "").toString();
 
-      sessions[idx].notesText = text;
-      sessions[idx].notesUpdatedAt = serverTimestamp();
+  const projectRef = doc(db, "projects", projectId);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(projectRef);
+    if (!snap.exists()) throw new Error("Project not found.");
+    const data = snap.data();
 
-      tx.update(projectRef, { sessions });
+    const sessions = safeArray(data.sessions).map((s) => ({ ...s }));
+    const idx = sessions.findIndex((s) => s?.id === sessionId);
+    if (idx < 0) throw new Error("Session not found.");
+
+    sessions[idx].notesText = text;
+
+    // ✅ IMPORTANT: use a normal timestamp object, NOT serverTimestamp()
+    sessions[idx].notesUpdatedAt = nowSeconds();
+
+    tx.update(projectRef, { sessions });
+  });
+
+  // local patch (best-effort)
+  setProjects((prev) =>
+    prev.map((p) => {
+      if (p.id !== projectId) return p;
+      const sessions = safeArray(p.sessions).map((s) =>
+        s?.id === sessionId ? { ...s, notesText: text, notesUpdatedAt: nowSeconds() } : s
+      );
+      return { ...p, sessions };
+    })
+  );
+
+  if (activeProject?.id === projectId) {
+    setActiveProject((p) => {
+      if (!p) return p;
+      const sessions = safeArray(p.sessions).map((s) =>
+        s?.id === sessionId ? { ...s, notesText: text, notesUpdatedAt: nowSeconds() } : s
+      );
+      return { ...p, sessions };
     });
-
-    // local patch (best-effort)
-    setProjects((prev) =>
-      prev.map((p) => {
-        if (p.id !== projectId) return p;
-        const sessions = safeArray(p.sessions).map((s) =>
-          s?.id === sessionId ? { ...s, notesText: text, notesUpdatedAt: nowSeconds() } : s
-        );
-        return { ...p, sessions };
-      })
-    );
-    if (activeProject?.id === projectId) {
-      setActiveProject((p) => {
-        if (!p) return p;
-        const sessions = safeArray(p.sessions).map((s) =>
-          s?.id === sessionId ? { ...s, notesText: text, notesUpdatedAt: nowSeconds() } : s
-        );
-        return { ...p, sessions };
-      });
-    }
-  };
+  }
+};
 
   const deleteSession = async (projectId, sessionId) => {
     if (!user?.uid || !projectId || !sessionId) return;

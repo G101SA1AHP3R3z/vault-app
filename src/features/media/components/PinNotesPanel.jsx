@@ -19,10 +19,10 @@ export default function PinNotesPanel({
   toggleAddPinMode,
 
   openPinEditor,
-  onUpdateMediaNote,
+  onUpdateMediaNote, // ✅ expects (projectId, mediaId, text)
   onDeleteHotspot,
 
-  // optional
+  // optional (kept for compatibility)
   moreFromSession,
   onSelectMedia,
 }) {
@@ -32,7 +32,6 @@ export default function PinNotesPanel({
   const danger = palette?.danger || "rgba(255,77,46,0.92)";
 
   const initialNote = useMemo(() => {
-    // support multiple legacy fields
     return safeText(media?.generalNote || media?.note || media?.notes || media?.caption || "");
   }, [media?.generalNote, media?.note, media?.notes, media?.caption, media?.id]);
 
@@ -45,14 +44,28 @@ export default function PinNotesPanel({
     setDirty(false);
   }, [initialNote, media?.id]);
 
+  const flushSave = async (text) => {
+    if (!onUpdateMediaNote || !projectId || !media?.id) return;
+    try {
+      await onUpdateMediaNote(projectId, media.id, text);
+    } catch (e) {
+      console.error("Failed to save media note", e);
+    }
+  };
+
   const scheduleSave = (next) => {
-    if (!onUpdateMediaNote || !media?.id) return;
+    setNote(next);
+
+    // If we can't save, just behave like local draft
+    if (!onUpdateMediaNote || !projectId || !media?.id) return;
+
     setDirty(true);
     if (timerRef.current) clearTimeout(timerRef.current);
 
     timerRef.current = setTimeout(async () => {
       try {
-        await onUpdateMediaNote?.(projectId, media?.sessionId, media?.id, next);
+        // ✅ correct signature
+        await onUpdateMediaNote(projectId, media.id, next);
       } catch (e) {
         console.error("Failed to save media note", e);
       } finally {
@@ -66,12 +79,11 @@ export default function PinNotesPanel({
   }, []);
 
   const annotations = useMemo(() => {
-    const list = (Array.isArray(hotspots) ? hotspots : []).map((h, idx) => ({
+    return (Array.isArray(hotspots) ? hotspots : []).map((h, idx) => ({
       ...h,
       _index: idx + 1,
       _text: safeText(h?.note || h?.label || ""),
     }));
-    return list;
   }, [hotspots]);
 
   const selected = useMemo(() => {
@@ -96,17 +108,8 @@ export default function PinNotesPanel({
       >
         <textarea
           value={note}
-          onChange={(e) => {
-            const next = e.target.value;
-            setNote(next);
-            scheduleSave(next);
-          }}
-          onBlur={() => {
-            // flush-ish
-            if (onUpdateMediaNote && media?.id) {
-              scheduleSave(note);
-            }
-          }}
+          onChange={(e) => scheduleSave(e.target.value)}
+          onBlur={() => flushSave(note)}
           rows={note ? 4 : 3}
           placeholder="Optional — add a general note for this photo."
           className="w-full bg-transparent outline-none resize-none text-[13px]"
@@ -119,7 +122,7 @@ export default function PinNotesPanel({
         />
 
         <div className="px-4 pb-3 text-[11px]" style={{ color: "rgba(0,0,0,0.38)", fontFamily: fontSans }}>
-          {dirty ? "Saving…" : "You can keep notes without annotations."}
+          {dirty ? "Saving…" : "Optional — notes can exist without annotations."}
         </div>
       </div>
 
@@ -166,7 +169,6 @@ export default function PinNotesPanel({
         )}
       </div>
 
-      {/* Add mode hint */}
       {isAddPinMode ? (
         <div
           className="mt-3"
@@ -185,14 +187,12 @@ export default function PinNotesPanel({
         </div>
       ) : null}
 
-      {/* Pins list */}
       {!hasPins ? (
         <div className="mt-3 text-[13px]" style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}>
           No annotations yet.
         </div>
       ) : (
         <>
-          {/* quick chips */}
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
             <style>{`.hide-scroll::-webkit-scrollbar{ display:none; }`}</style>
             <div className="flex gap-2 hide-scroll">
@@ -221,7 +221,6 @@ export default function PinNotesPanel({
             </div>
           </div>
 
-          {/* selected detail */}
           {selected ? (
             <div
               className="mt-4"
@@ -242,11 +241,7 @@ export default function PinNotesPanel({
                   </div>
 
                   <div className="mt-2 text-[13px]" style={{ color: "rgba(0,0,0,0.78)", fontFamily: fontSans, lineHeight: 1.55 }}>
-                    {selected._text ? (
-                      selected._text
-                    ) : (
-                      <span style={{ color: "rgba(0,0,0,0.35)" }}>No note yet. (Optional)</span>
-                    )}
+                    {selected._text ? selected._text : <span style={{ color: "rgba(0,0,0,0.35)" }}>No note yet. (Optional)</span>}
                   </div>
                 </div>
 
@@ -295,8 +290,6 @@ export default function PinNotesPanel({
         </>
       )}
 
-      {/* (Optional) future: session strip / related thumbnails
-          Keep the props here so nothing breaks, but we won’t render it yet. */}
       {Array.isArray(moreFromSession) && moreFromSession.length > 0 && typeof onSelectMedia === "function" ? (
         <div className="mt-8" />
       ) : null}
