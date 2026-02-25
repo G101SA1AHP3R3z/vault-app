@@ -1,5 +1,6 @@
+// /src/features/media/MediaViewer.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, Info, Share2, Trash2 } from "lucide-react";
+import { ChevronLeft, Info, Share2, Trash2, X } from "lucide-react";
 
 import MediaStage from "./components/MediaStage";
 import PinNotesPanel from "./components/PinNotesPanel";
@@ -24,6 +25,44 @@ function resolveMediaUrl(m) {
     (typeof m.src === "string" && m.src) ||
     (typeof m.originalUrl === "string" && m.originalUrl) ||
     ""
+  );
+}
+
+function PillButton({ children, onClick, title, ariaLabel, subtle = true }) {
+  return (
+    <button
+      onClick={onClick}
+      className="h-9 px-3 rounded-[999px] inline-flex items-center gap-2 active:scale-[0.99] transition-transform"
+      style={{
+        background: subtle ? "rgba(255,255,255,0.76)" : "rgba(255,255,255,0.92)",
+        border: "1px solid rgba(0,0,0,0.10)",
+        color: "rgba(0,0,0,0.72)",
+        WebkitTapHighlightColor: "transparent",
+        backdropFilter: "blur(14px)",
+      }}
+      aria-label={ariaLabel}
+      title={title}
+    >
+      {children}
+    </button>
+  );
+}
+
+function RoundIconButton({ active, onClick, children, title, ariaLabel }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-10 h-10 grid place-items-center rounded-[12px] active:scale-[0.98] transition-transform"
+      style={{
+        background: active ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.82)",
+        border: "1px solid rgba(0,0,0,0.10)",
+        WebkitTapHighlightColor: "transparent",
+      }}
+      aria-label={ariaLabel}
+      title={title}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -58,9 +97,9 @@ export default function MediaViewer({
   const isEmbedded = mode === "embedded";
 
   /**
-   * - immersive: black bg, chrome hidden (BUT space reserved so photo never jumps)
-   * - controls: light bg, chrome visible, filmstrip visible
-   * - info: light bg, chrome visible (i selected), filmstrip hidden, notes sheet up
+   * - immersive: black bg, chrome hidden (space reserved so photo never jumps)
+   * - controls: light bg, chrome visible + filmstrip
+   * - info: light bg, notes sheet open
    */
   const [viewMode, setViewMode] = useState("immersive"); // "immersive" | "controls" | "info"
   const [isAddPinMode, setIsAddPinMode] = useState(false);
@@ -71,6 +110,9 @@ export default function MediaViewer({
 
   const stageRef = useRef(null);
   const carouselRef = useRef(null);
+
+  const fontSerif = headerFont || "var(--font-serif)";
+  const fontSans = "var(--font-sans)";
 
   // Always pass a usable url into MediaStage
   const stageMedia = useMemo(() => {
@@ -87,7 +129,7 @@ export default function MediaViewer({
     return currentHotspots.find((h) => h.id === selectedPinId) || null;
   }, [selectedPinId, currentHotspots]);
 
-  // Do NOT reset viewMode when changing media (keeps light mode while browsing filmstrip)
+  // Reset per-media transient state
   useEffect(() => {
     setSelectedPinId(null);
     setIsAddPinMode(false);
@@ -101,15 +143,15 @@ export default function MediaViewer({
 
   const bg = isImmersive ? "#000000" : "#FFFEFA";
 
-  // Notes view look (photo fills top half, slight zoom, edge-to-edge)
+  // Notes view: photo fills top half, slight zoom, edge-to-edge
   const imgZoom = isInfo ? 1.05 : 1.0;
   const fitMode = isInfo ? "cover" : "contain";
-  const clipBottom = "0px"; // do not clip; we size the stage area instead
+  const clipBottom = "0px";
 
   // Pins: only show in info after user selects one (and not while placing)
   const showPins = isInfo && !!selectedPinId && !isAddPinMode;
 
-  const accent = palette?.accent || "rgba(255,77,46,0.95)";
+  const danger = palette?.danger || "rgba(255,77,46,0.92)";
 
   const getDisplayXY = (h) => {
     const x = clamp01(h?.x);
@@ -175,12 +217,13 @@ export default function MediaViewer({
         return;
       }
     } catch {
-      return;
+      // ignore
     }
 
     try {
       await navigator.clipboard?.writeText?.(url);
     } catch {
+      // last resort
       window.prompt("Copy link:", url);
     }
   };
@@ -223,20 +266,18 @@ export default function MediaViewer({
     );
   };
 
-  // ✅ THE NO-JUMP RULE:
-  // Always reserve the exact same chrome space, regardless of mode.
-  // We only fade chrome in/out (opacity/transform), never add/remove layout padding.
+  // ✅ NO-JUMP RULE: reserve the same chrome space always; fade chrome only.
   const TOP_H = 64;
-  const BOTTOM_H = 88;
+  const BOTTOM_H = 96;
   const STRIP_H = filmstrip.length > 0 ? 78 : 0;
 
   const chromeVisible = !isImmersive;
-  const stripVisible = isControls; // only in controls
+  const stripVisible = isControls;
 
   // In info mode, the stage box becomes top-half (like iOS)
   const stageBoxHeight = isInfo ? `calc(50vh - ${TOP_H}px)` : "100%";
 
-  // --- Swipe wiring (uses your hook) ---
+  // Swipe wiring
   const canPrev = mediaIndex > 0;
   const canNext = mediaIndex < Math.max(0, mediaCount - 1);
   const swipeEnabled = !isEmbedded;
@@ -248,7 +289,6 @@ export default function MediaViewer({
     onPrev,
     onNext,
     onSwipeDown,
-    // Block swipes when user is placing pins, editing, or in notes sheet
     isBlocked: !!pinOpen || !!isAddPinMode || viewMode === "info",
     canPrev,
     canNext,
@@ -285,7 +325,6 @@ export default function MediaViewer({
                 overflow: "hidden",
               }}
             >
-              {/* Swipe surface + animated translate wrapper */}
               <div
                 className="absolute inset-0"
                 style={{ touchAction: swipeEnabled ? "none" : "pan-y" }}
@@ -331,7 +370,7 @@ export default function MediaViewer({
           </div>
         </div>
 
-        {/* TOP NAV — fades in/out, but space is always reserved */}
+        {/* TOP CONTROLS (below the app header concept; this is viewer-local) */}
         {!isEmbedded && (
           <div
             className="absolute top-0 left-0 right-0 z-[300] pointer-events-none"
@@ -343,28 +382,49 @@ export default function MediaViewer({
             }}
           >
             <div className="px-4 pt-4 pb-2 flex items-center justify-between gap-3">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onBack?.();
-                }}
-                className="pointer-events-auto w-10 h-10 rounded-[10px] grid place-items-center"
-                style={{
-                  background: "rgba(255,255,255,0.95)",
-                  border: "1px solid rgba(0,0,0,0.10)",
-                }}
-                aria-label="Back"
-              >
-                <ChevronLeft className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
-              </button>
+              <div className="pointer-events-auto">
+                <PillButton
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onBack?.();
+                  }}
+                  ariaLabel="Back"
+                  title="Back"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span className="text-[12px] font-semibold uppercase" style={{ letterSpacing: "0.16em" }}>
+                    Back
+                  </span>
+                </PillButton>
+              </div>
 
               <div className="flex-1" />
-              <div className="w-10 h-10" />
+
+              {/* Right-side close in info mode (optional but feels nice) */}
+              {isInfo ? (
+                <div className="pointer-events-auto">
+                  <RoundIconButton
+                    ariaLabel="Close notes"
+                    title="Close notes"
+                    active={false}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setViewMode("controls");
+                      setIsAddPinMode(false);
+                      setSelectedPinId(null);
+                    }}
+                  >
+                    <X className="w-5 h-5" style={{ color: "rgba(0,0,0,0.78)" }} />
+                  </RoundIconButton>
+                </div>
+              ) : (
+                <div className="w-10 h-10" />
+              )}
             </div>
           </div>
         )}
 
-        {/* FILMSTRIP — lives inside reserved strip area (never affects stage size) */}
+        {/* FILMSTRIP (controls-only) */}
         {!isEmbedded && filmstrip.length > 0 && (
           <div
             className="absolute left-0 right-0 z-[290] px-4"
@@ -394,7 +454,6 @@ export default function MediaViewer({
                     onClick={(e) => {
                       e.stopPropagation();
                       onSelectMedia?.({ ...m, url: mUrl });
-                      // important: do NOT change viewMode here
                     }}
                     className="shrink-0"
                     style={{ WebkitTapHighlightColor: "transparent" }}
@@ -403,20 +462,20 @@ export default function MediaViewer({
                   >
                     <div
                       style={{
-                        width: 54,
-                        height: 54,
+                        width: 52,
+                        height: 52,
                         borderRadius: 12,
                         overflow: "hidden",
                         border: active
-                          ? "2px solid rgba(0,0,0,0.85)"
-                          : "1px solid rgba(0,0,0,0.12)",
+                          ? "2px solid rgba(0,0,0,0.78)"
+                          : "1px solid rgba(0,0,0,0.10)",
                         background: "rgba(0,0,0,0.04)",
                       }}
                     >
                       <img
                         src={m.thumbnailUrl || mUrl}
                         alt=""
-                        className="w-full h-full object-cover"
+                        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                         decoding="async"
                         draggable={false}
                       />
@@ -428,7 +487,7 @@ export default function MediaViewer({
           </div>
         )}
 
-        {/* BOTTOM BAR — fades in/out, but space is always reserved */}
+        {/* BOTTOM BAR */}
         {!isEmbedded && (
           <div
             className="absolute left-0 right-0 bottom-0 z-[300] pb-5 flex justify-center pointer-events-none"
@@ -440,51 +499,66 @@ export default function MediaViewer({
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div
-              className="pointer-events-auto h-12 px-5 rounded-[999px] flex items-center gap-7"
-              style={{
-                background: "rgba(255,255,255,0.95)",
-                border: "1px solid rgba(0,0,0,0.10)",
-                backdropFilter: "blur(14px)",
-              }}
-            >
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleShare();
-                }}
-                className="w-9 h-9 grid place-items-center"
-                aria-label="Share"
-              >
-                <Share2 className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
-              </button>
-
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setViewMode((m) => (m === "info" ? "controls" : "info"));
-                  setIsAddPinMode(false);
-                  setSelectedPinId(null);
-                }}
-                className="w-9 h-9 grid place-items-center rounded-full"
-                aria-label="Info"
+            <div className="pointer-events-auto flex items-center gap-2">
+              <div
+                className="h-12 px-3 rounded-[999px] flex items-center gap-2"
                 style={{
-                  background: isInfo ? "rgba(0,0,0,0.08)" : "transparent",
+                  background: "rgba(255,255,255,0.92)",
+                  border: "1px solid rgba(0,0,0,0.10)",
+                  backdropFilter: "blur(14px)",
                 }}
               >
-                <Info className="w-5 h-5" style={{ color: "rgba(0,0,0,0.82)" }} />
-              </button>
+                <RoundIconButton
+                  ariaLabel="Share"
+                  title="Share"
+                  active={false}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleShare();
+                  }}
+                >
+                  <Share2 className="w-5 h-5" style={{ color: "rgba(0,0,0,0.80)" }} />
+                </RoundIconButton>
 
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDelete();
+                <RoundIconButton
+                  ariaLabel="Notes"
+                  title="Notes"
+                  active={isInfo}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setViewMode((m) => (m === "info" ? "controls" : "info"));
+                    setIsAddPinMode(false);
+                    setSelectedPinId(null);
+                  }}
+                >
+                  <Info className="w-5 h-5" style={{ color: "rgba(0,0,0,0.80)" }} />
+                </RoundIconButton>
+
+                <RoundIconButton
+                  ariaLabel="Delete"
+                  title="Delete"
+                  active={false}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete();
+                  }}
+                >
+                  <Trash2 className="w-5 h-5" style={{ color: danger }} />
+                </RoundIconButton>
+              </div>
+
+              {/* tiny mode hint (optional, very subtle) */}
+              <div
+                className="hidden sm:block text-[11px] font-semibold uppercase"
+                style={{
+                  color: "rgba(0,0,0,0.32)",
+                  letterSpacing: "0.18em",
+                  fontFamily: fontSans,
+                  marginLeft: 10,
                 }}
-                className="w-9 h-9 grid place-items-center"
-                aria-label="Delete"
               >
-                <Trash2 className="w-5 h-5" style={{ color: "rgba(220,38,38,0.92)" }} />
-              </button>
+                {isControls ? "Swipe" : isInfo ? "Notes" : "Tap"}
+              </div>
             </div>
           </div>
         )}
@@ -498,7 +572,7 @@ export default function MediaViewer({
               left: 0,
               right: 0,
               bottom: 0,
-              zIndex: 200, // below top/bottom chrome (300)
+              zIndex: 200,
               background: "#FFFEFA",
               borderTop: "1px solid rgba(0,0,0,0.08)",
               minHeight: "50vh",
@@ -514,25 +588,23 @@ export default function MediaViewer({
           >
             <div className="px-5 pt-4">
               <div
-                className="inline-flex items-center gap-2 text-[11px] font-semibold tracking-[0.18em]"
-                style={{ color: "rgba(0,0,0,0.55)", fontFamily: headerFont }}
+                className="text-[11px] font-semibold uppercase"
+                style={{ color: "rgba(0,0,0,0.45)", letterSpacing: "0.18em", fontFamily: fontSans }}
               >
-                <span>DETAILS</span>
-                <span
-                  style={{
-                    width: 4,
-                    height: 4,
-                    borderRadius: 99,
-                    background: accent,
-                    opacity: 0.7,
-                  }}
-                />
-                <span style={{ letterSpacing: 0, fontWeight: 700 }}>Notes</span>
+                Notes & Annotations
               </div>
+
+              <div
+                className="mt-2"
+                style={{
+                  height: 1,
+                  background: "rgba(0,0,0,0.06)",
+                }}
+              />
             </div>
 
             <PinNotesPanel
-              headerFont={headerFont}
+              headerFont={fontSerif}
               palette={palette}
               projectId={project?.id}
               hotspots={currentHotspots}
@@ -561,7 +633,7 @@ export default function MediaViewer({
             <PinEditorModal
               open={pinOpen}
               palette={palette}
-              headerFont={headerFont}
+              headerFont={fontSerif}
               initialText={pinDraft?.note || ""}
               onClose={closePinEditor}
               onSave={savePinEditor}

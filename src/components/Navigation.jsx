@@ -1,158 +1,194 @@
+// /src/components/Navigation.jsx
 import React, { useEffect, useRef, useState } from "react";
-import { MoreHorizontal, Search } from "lucide-react";
+import { Menu, X, ChevronLeft, Archive, Settings, Search } from "lucide-react";
 
-function Menu({ palette, items = [] }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef(null);
-
-  useEffect(() => {
-    const onDown = (e) => {
-      if (!wrapRef.current) return;
-      if (!wrapRef.current.contains(e.target)) setOpen(false);
-    };
-    window.addEventListener("pointerdown", onDown);
-    return () => window.removeEventListener("pointerdown", onDown);
-  }, []);
-
+function TopBar({ onOpenMenu }) {
   return (
-    <div ref={wrapRef} className="relative">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-10 h-10 grid place-items-center rounded-[12px] active:scale-[0.98] transition-transform"
-        style={{
-          background: "rgba(255,255,255,0.85)",
-          border: `1px solid ${palette.line}`,
-          color: "rgba(0,0,0,0.70)",
-          WebkitTapHighlightColor: "transparent",
-        }}
-        aria-label="More"
-        title="More"
-      >
-        <MoreHorizontal className="w-5 h-5" />
-      </button>
-
-      {open && (
-        <div
-          className="absolute right-0 mt-2 w-56 overflow-hidden z-50"
-          style={{
-            borderRadius: 12,
-            background: "rgba(255,255,255,0.95)",
-            border: `1px solid ${palette.line}`,
-            boxShadow: "0 18px 45px -38px rgba(0,0,0,0.45)",
-            backdropFilter: "blur(18px)",
-          }}
-        >
-          {items
-            .filter(Boolean)
-            .map((it, idx) => (
-              <button
-                key={idx}
-                onClick={() => {
-                  setOpen(false);
-                  it?.onClick?.();
-                }}
-                className="w-full px-4 py-3 flex items-center gap-3 text-sm font-semibold text-left hover:bg-black/5"
-                style={{
-                  color: it?.danger ? "rgba(220,38,38,0.95)" : "rgba(0,0,0,0.78)",
-                  WebkitTapHighlightColor: "transparent",
-                }}
-              >
-                {it?.icon ? <it.icon className="w-4 h-4" /> : null}
-                {it?.label}
-              </button>
-            ))}
+    <div
+      className="sticky top-0 z-40"
+      style={{
+        background: "rgba(255,254,250,0.88)",
+        backdropFilter: "blur(16px)",
+        borderBottom: "1px solid rgba(0,0,0,0.06)",
+      }}
+    >
+      <div className="px-6 pt-4 pb-3 flex items-center justify-between">
+        <div className="min-w-0">
+          <div
+            className="text-[12px] font-semibold tracking-[0.16em] uppercase"
+            style={{ color: "rgba(0,0,0,0.55)" }}
+          >
+            [ Index ]
+          </div>
         </div>
-      )}
+
+        <button
+          onClick={onOpenMenu}
+          className="w-9 h-9 grid place-items-center rounded-[12px] active:scale-[0.98] transition-transform"
+          style={{
+            background: "rgba(255,255,255,0.72)",
+            border: "1px solid rgba(0,0,0,0.10)",
+            WebkitTapHighlightColor: "transparent",
+          }}
+          aria-label="Menu"
+          title="Menu"
+        >
+          <Menu className="w-5 h-5" style={{ color: "rgba(0,0,0,0.78)" }} />
+        </button>
+      </div>
     </div>
   );
 }
 
+function BackRow({ onBack }) {
+  if (!onBack) return null;
+  return (
+    <div className="px-6 pt-3">
+      <button
+        onClick={onBack}
+        className="h-9 px-3 rounded-[999px] inline-flex items-center gap-2 active:scale-[0.99] transition-transform"
+        style={{
+          background: "rgba(255,255,255,0.76)",
+          border: "1px solid rgba(0,0,0,0.10)",
+          color: "rgba(0,0,0,0.70)",
+          WebkitTapHighlightColor: "transparent",
+        }}
+        aria-label="Back"
+        title="Back"
+      >
+        <ChevronLeft className="w-4 h-4" />
+        <span className="text-[12px] font-semibold uppercase" style={{ letterSpacing: "0.16em" }}>
+          Back
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function DrawerItem({ label, active, onClick }) {
+  return (
+    <button onClick={onClick} className="w-full text-left py-2.5" style={{ WebkitTapHighlightColor: "transparent" }}>
+      <div className="flex items-center gap-2">
+        <div
+          className="text-[13px] font-semibold uppercase"
+          style={{
+            color: active ? "rgba(0,0,0,0.86)" : "rgba(0,0,0,0.72)",
+            letterSpacing: "0.18em",
+          }}
+        >
+          {label}
+        </div>
+        {active ? <div className="w-1.5 h-1.5 rounded-full" style={{ background: "rgba(0,0,0,0.60)" }} /> : null}
+      </div>
+    </button>
+  );
+}
+
+
 /**
- * Web-only friendly header.
- * - Left: Index (home)
- * - Center: Search
- * - Right: Primary action + kebab menu
+ * Props supported (backward compatible):
+ * - New: { tab, onTabChange, onBack }
+ * - Old: { currentTab, setTab }
+ *
+ * NOTE: We intentionally DO NOT show page titles under [ INDEX ].
+ * Back button renders BELOW the header (BackRow).
  */
-export default function Navigation({
-  title = "Index",
-  showSearch = true,
-  searchValue = "",
-  onSearchChange,
-  primaryLabel,
-  onPrimary,
-  onHome,
-  menuItems = [],
-}) {
-  const palette = {
-    line: "rgba(0,0,0,0.10)",
-    paper: "rgba(255,255,255,0.72)",
+export default function Navigation(props) {
+  const tab = props.tab ?? props.currentTab ?? "library";
+  const onTabChange = props.onTabChange ?? props.setTab;
+  const onBack = props.onBack ?? null;
+
+  const [open, setOpen] = useState(false);
+  const panelRef = useRef(null);
+
+  const go = (nextTab) => {
+    onTabChange?.(nextTab);
+    setOpen(false);
   };
 
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (!panelRef.current) return;
+      if (!panelRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("touchstart", onDown);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("touchstart", onDown);
+    };
+  }, [open]);
+
   return (
-    <div className="sticky top-0 z-40">
-      <div
-        className="mx-auto max-w-6xl"
-        style={{
-          background: palette.paper,
-          borderBottom: `1px solid ${palette.line}`,
-          backdropFilter: "blur(18px)",
-        }}
-      >
-        <div className="px-6 py-4 flex items-center gap-3">
-          <button
-            onClick={onHome}
-            className="text-left"
-            style={{ WebkitTapHighlightColor: "transparent" }}
-            aria-label="Go to Library"
-            title="Library"
+    <>
+      <TopBar onOpenMenu={() => setOpen(true)} />
+      <BackRow onBack={onBack} />
+
+      {open ? (
+        <div className="fixed inset-0 z-[80]">
+          <div
+            className="absolute inset-0"
+            style={{
+              background: "rgba(255,255,255,0.60)",
+              backdropFilter: "blur(18px)",
+            }}
+          />
+
+          <div
+            ref={panelRef}
+            className="absolute top-0 right-0 h-full"
+            style={{
+              width: "min(360px, 78vw)",
+              background: "rgba(255,255,255,0.92)",
+              borderLeft: "1px solid rgba(0,0,0,0.08)",
+              boxShadow: "-30px 0 80px -70px rgba(0,0,0,0.55)",
+              backdropFilter: "blur(18px)",
+            }}
           >
-            <div
-              className="text-[14px] font-semibold"
-              style={{ color: "rgba(0,0,0,0.86)", letterSpacing: "0.02em" }}
-            >
-              {title}
-            </div>
-          </button>
+            <div className="px-6 pt-5 pb-6">
+              <div className="flex items-center justify-between">
+                <div className="text-[12px] font-semibold tracking-[0.16em] uppercase" style={{ color: "rgba(0,0,0,0.45)" }}>
+                  Menu
+                </div>
 
-          <div className="flex-1">
-            {showSearch ? (
-              <div
-                className="w-full px-4 py-2.5 rounded-[12px] flex items-center gap-3"
-                style={{
-                  background: "rgba(255,255,255,0.70)",
-                  border: `1px solid ${palette.line}`,
-                }}
-              >
-                <Search className="w-4 h-4" style={{ color: "rgba(0,0,0,0.45)" }} />
-                <input
-                  value={searchValue}
-                  onChange={(e) => onSearchChange?.(e.target.value)}
-                  placeholder="Search projects or tags…"
-                  className="w-full bg-transparent outline-none text-sm"
-                  style={{ color: "rgba(0,0,0,0.78)" }}
-                />
+                <button
+                  onClick={() => setOpen(false)}
+                  className="w-10 h-10 grid place-items-center rounded-[12px] active:scale-[0.98] transition-transform"
+                  style={{
+                    background: "rgba(255,255,255,0.70)",
+                    border: "1px solid rgba(0,0,0,0.10)",
+                    WebkitTapHighlightColor: "transparent",
+                  }}
+                  aria-label="Close menu"
+                  title="Close"
+                >
+                  <X className="w-5 h-5" style={{ color: "rgba(0,0,0,0.72)" }} />
+                </button>
               </div>
-            ) : null}
+
+              <div className="mt-10 flex flex-col gap-1">
+                <DrawerItem label="Projects" active={tab === "library"} onClick={() => go("library")} />
+                <DrawerItem label="Archive" active={tab === "graveyard"} onClick={() => go("graveyard")} />
+                <DrawerItem label="Settings" active={tab === "vault"} onClick={() => go("vault")} />
+
+                <div className="mt-3" style={{ height: 1, background: "rgba(0,0,0,0.06)" }} />
+                <DrawerItem label="Search" active={tab === "search"} onClick={() => go("search")} />
+              </div>
+            </div>
           </div>
-
-          {primaryLabel ? (
-            <button
-              onClick={onPrimary}
-              className="h-10 px-4 rounded-[12px] text-[12px] font-semibold tracking-[0.12em] uppercase active:scale-[0.99] transition-transform"
-              style={{
-                background: "rgba(255,77,46,0.95)",
-                color: "rgba(0,0,0,0.86)",
-                border: "1px solid rgba(0,0,0,0.10)",
-                WebkitTapHighlightColor: "transparent",
-              }}
-            >
-              {primaryLabel}
-            </button>
-          ) : null}
-
-          <Menu palette={palette} items={menuItems} />
         </div>
-      </div>
-    </div>
+      ) : null}
+
+      
+    </>
   );
 }

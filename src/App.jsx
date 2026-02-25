@@ -1,222 +1,36 @@
 // /src/App.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, MoreHorizontal } from "lucide-react";
 
 import { VaultProvider, useVault } from "./context/VaultContext";
 
 import Navigation from "./components/Navigation";
 import NewProjectModal from "./components/NewProjectModal";
-import AddMediaModal from "./components/AddMediaModal";
 import Login from "./components/Login";
 
 import LibraryGrid from "./features/library/LibraryGrid";
 import MediaViewer from "./features/media/MediaViewer";
 import ProjectView from "./features/project/ProjectView";
+import Settings from "./features/settings/settings";
 import useProjectMediaNavigator from "./features/media/hooks/useProjectMediaNavigator";
 
-function formatDuration(sec) {
-  const s = Math.max(0, Math.floor(sec || 0));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m}:${String(r).padStart(2, "0")}`;
-}
-
-function VoiceNoteRecorderModal({ open, palette, headerFont, title, onClose, onSave }) {
-  const [state, setState] = useState("idle"); // idle | recording | ready
-  const [err, setErr] = useState("");
-  const [sec, setSec] = useState(0);
-  const [blob, setBlob] = useState(null);
-
-  const recorderRef = useRef(null);
-  const chunksRef = useRef([]);
-  const tickRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) {
-      setState("idle");
-      setErr("");
-      setSec(0);
-      setBlob(null);
-      chunksRef.current = [];
-      if (tickRef.current) {
-        clearInterval(tickRef.current);
-        tickRef.current = null;
-      }
-      try {
-        recorderRef.current?.stream?.getTracks?.().forEach((t) => t.stop());
-      } catch {}
-      recorderRef.current = null;
+function formatDateMMDDYYYY(ts) {
+  try {
+    if (!ts) return "";
+    if (typeof ts?.toDate === "function") {
+      const d = ts.toDate();
+      return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "numeric" });
     }
-  }, [open]);
-
-  const start = async () => {
-    setErr("");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream, { mimeType: "audio/webm" });
-
-      recorderRef.current = rec;
-      chunksRef.current = [];
-
-      rec.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
-      };
-
-      rec.onstop = () => {
-        const b = new Blob(chunksRef.current, { type: "audio/webm" });
-        setBlob(b);
-        setState("ready");
-        try {
-          rec.stream.getTracks().forEach((t) => t.stop());
-        } catch {}
-      };
-
-      rec.start();
-      setState("recording");
-      setSec(0);
-      tickRef.current = setInterval(() => setSec((v) => v + 1), 1000);
-    } catch (e) {
-      console.error(e);
-      setErr(
-        e?.name === "NotAllowedError"
-          ? "Microphone permission was blocked. Allow mic access in your browser/site settings."
-          : e?.message || "Could not start recording."
-      );
+    if (typeof ts?.seconds === "number") {
+      const d = new Date(ts.seconds * 1000);
+      return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "numeric" });
     }
-  };
-
-  const stop = () => {
-    try {
-      if (tickRef.current) {
-        clearInterval(tickRef.current);
-        tickRef.current = null;
-      }
-      recorderRef.current?.stop?.();
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Could not stop recording.");
+    const d = new Date(ts);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "numeric" });
     }
-  };
-
-  const save = async () => {
-    if (!blob) return;
-    try {
-      const file = new File([blob], `voice_${Date.now()}.webm`, { type: "audio/webm" });
-      await onSave?.({ file, durationSec: sec });
-      onClose?.();
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Could not save voice note.");
-    }
-  };
-
-  if (!open) return null;
-
-  const line = palette?.line || "rgba(0,0,0,0.10)";
-  const accent = palette?.accent || "rgba(255,77,46,0.95)";
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-end justify-center">
-      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.35)" }} onClick={onClose} />
-      <div
-        className="relative w-full max-w-md mx-auto"
-        style={{
-          background: "rgba(255,254,250,0.98)",
-          borderTopLeftRadius: 16,
-          borderTopRightRadius: 16,
-          border: `1px solid ${line}`,
-          boxShadow: "0 -20px 60px -40px rgba(0,0,0,0.55)",
-        }}
-      >
-        <div className="px-6 pt-5 pb-6">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[11px] font-semibold tracking-[0.18em]" style={{ color: "rgba(0,0,0,0.42)" }}>
-                VOICE NOTE
-              </div>
-              <div
-                className="mt-2 text-[16px] font-semibold"
-                style={{ fontFamily: headerFont, color: "rgba(0,0,0,0.86)" }}
-              >
-                {title || "Session"}
-              </div>
-            </div>
-            <button
-              onClick={onClose}
-              className="px-3 h-9 rounded-[8px] text-[12px] font-semibold tracking-[0.12em]"
-              style={{
-                background: "rgba(255,255,255,0.75)",
-                border: `1px solid ${line}`,
-                color: "rgba(0,0,0,0.70)",
-              }}
-            >
-              CLOSE
-            </button>
-          </div>
-
-          <div
-            className="mt-4 px-4 py-4"
-            style={{
-              borderRadius: 8,
-              background: "rgba(0,0,0,0.03)",
-              border: "1px solid rgba(0,0,0,0.06)",
-            }}
-          >
-            <div className="flex items-center justify-between">
-              <div className="text-[12px]" style={{ color: "rgba(0,0,0,0.55)" }}>
-                {state === "recording" ? "Recording…" : state === "ready" ? "Preview" : "Tap record"}
-              </div>
-              <div className="text-[12px] font-semibold" style={{ color: "rgba(0,0,0,0.80)" }}>
-                {formatDuration(sec)}
-              </div>
-            </div>
-
-            {err ? (
-              <div className="mt-3 text-[12px]" style={{ color: "rgba(220,38,38,0.95)" }}>
-                {err}
-              </div>
-            ) : null}
-
-            {state === "ready" && blob ? <audio className="mt-4 w-full" controls src={URL.createObjectURL(blob)} /> : null}
-          </div>
-
-          <div className="mt-5 flex items-center justify-between gap-3">
-            {state === "recording" ? (
-              <button
-                onClick={stop}
-                className="flex-1 h-11 rounded-[8px] text-[12px] font-semibold tracking-[0.12em]"
-                style={{ background: accent, border: "1px solid rgba(0,0,0,0.12)", color: "rgba(0,0,0,0.85)" }}
-              >
-                STOP
-              </button>
-            ) : (
-              <button
-                onClick={start}
-                className="flex-1 h-11 rounded-[8px] text-[12px] font-semibold tracking-[0.12em]"
-                style={{ background: accent, border: "1px solid rgba(0,0,0,0.12)", color: "rgba(0,0,0,0.85)" }}
-              >
-                RECORD
-              </button>
-            )}
-
-            <button
-              onClick={save}
-              disabled={state !== "ready" || !blob}
-              className="flex-1 h-11 rounded-[8px] text-[12px] font-semibold tracking-[0.12em]"
-              style={{
-                background: state !== "ready" ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.78)",
-                border: `1px solid ${line}`,
-                color: state !== "ready" ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.78)",
-                cursor: state !== "ready" ? "not-allowed" : "pointer",
-              }}
-            >
-              SAVE
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  } catch {}
+  return "";
 }
 
 function AuthGate({ children }) {
@@ -232,28 +46,32 @@ function AuthGate({ children }) {
   return children;
 }
 
+/**
+ * Very light cream + barely-there backdrop shapes.
+ * Grain should be handled globally via .index-grain (in your index.css).
+ */
 function AbstractCreamBackdrop({ children }) {
   return (
-    <div className="min-h-screen relative" style={{ background: "#FFFEFA" }}>
+    <div className="min-h-screen relative index-grain" style={{ background: "#FFFEFA" }}>
       <div className="fixed inset-0 -z-10 overflow-hidden">
         <div
           className="absolute -top-28 -left-28 w-[520px] h-[520px] rounded-[48px] rotate-[18deg]"
-          style={{ background: "#FFEA3A", opacity: 0.12 }}
+          style={{ background: "#FFEA3A", opacity: 0.05 }}
         />
         <div
           className="absolute top-10 -right-64 w-[820px] h-[300px] rounded-[60px] rotate-[-12deg]"
-          style={{ background: "#3AA8FF", opacity: 0.08 }}
+          style={{ background: "#3AA8FF", opacity: 0.035 }}
         />
         <div
           className="absolute -bottom-44 left-16 w-[760px] h-[460px] rounded-[70px] rotate-[10deg]"
-          style={{ background: "#54E6C1", opacity: 0.07 }}
+          style={{ background: "#54E6C1", opacity: 0.03 }}
         />
         <div
           className="absolute inset-0"
           style={{
             background:
-              "linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.25) 40%, rgba(255,255,255,0.55) 100%)",
-            opacity: 0.55,
+              "linear-gradient(180deg, rgba(255,255,255,0.65) 0%, rgba(255,255,255,0.30) 40%, rgba(255,255,255,0.65) 100%)",
+            opacity: 0.45,
           }}
         />
       </div>
@@ -262,11 +80,174 @@ function AbstractCreamBackdrop({ children }) {
   );
 }
 
+function SessionDetailView({
+  session,
+  palette,
+  headerFont,
+  bodyFont,
+  mediaNotesById,
+  onOpenMedia,
+  onDeleteSession,
+  onShareSession,
+}) {
+  const fontSerif = headerFont;
+  const fontSans = bodyFont;
+
+  const line = palette?.line || "rgba(0,0,0,0.10)";
+  const media = Array.isArray(session?.media) ? session.media : [];
+  const thumbs = media.filter((m) => m?.url);
+  const count = thumbs.length;
+
+  const dateText = formatDateMMDDYYYY(session?.createdAt);
+
+  const [notesExpanded, setNotesExpanded] = useState(false);
+  const notesText = (session?.notesText || "").toString().trim();
+
+  const calcNoteCountForMedia = (m) => {
+    const general = (mediaNotesById?.[m?.id]?.text || "").trim() ? 1 : 0;
+    const hotspots = Array.isArray(m?.hotspots) ? m.hotspots.length : 0;
+    return general + hotspots;
+  };
+
+  return (
+    <div className="pt-6 pb-28">
+      {/* session actions (kept minimal; we'll replace prompt() with a proper sheet next pass) */}
+      <div className="px-6 flex items-center justify-end">
+        <button
+          className="w-10 h-10 rounded-[12px] inline-flex items-center justify-center active:scale-[0.98] transition-transform"
+          style={{
+            background: "rgba(255,255,255,0.78)",
+            border: `1px solid ${line}`,
+            color: "rgba(0,0,0,0.75)",
+            WebkitTapHighlightColor: "transparent",
+          }}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const action = window.prompt('Type: "share" or "delete"');
+            if (action === "share") onShareSession?.(session);
+            if (action === "delete") onDeleteSession?.(session);
+          }}
+          aria-label="More"
+          title="More"
+        >
+          <MoreHorizontal className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* title */}
+      <div className="px-6 mt-6 flex items-start justify-between gap-3">
+        <div
+          style={{
+            fontFamily: fontSerif,
+            fontSize: 32,
+            lineHeight: 1.08,
+            letterSpacing: "-0.01em",
+            color: "rgba(0,0,0,0.88)",
+            fontWeight: 600,
+          }}
+        >
+          {session?.title?.trim() || "Untitled"}
+        </div>
+      </div>
+
+      {/* meta */}
+      <div className="px-6 mt-2 text-[12px]" style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}>
+        {dateText ? `${dateText} · ` : ""}
+        {count} {count === 1 ? "photo" : "photos"}
+      </div>
+
+      {/* thumbnails */}
+      <div className="px-6 mt-6">
+        <div className="grid grid-cols-2 gap-3">
+          {thumbs.map((m) => {
+            const notesCount = calcNoteCountForMedia(m);
+            return (
+              <button
+                key={m.id}
+                onClick={() => onOpenMedia?.(session.id, m.id)}
+                className="text-left"
+                style={{ WebkitTapHighlightColor: "transparent" }}
+              >
+                <div
+                  className="overflow-hidden"
+                  style={{
+                    borderRadius: 14,
+                    border: "1px solid rgba(0,0,0,0.08)",
+                    background: "rgba(0,0,0,0.06)",
+                    aspectRatio: "1 / 1",
+                  }}
+                >
+                  <img
+                    src={m.url}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                    draggable={false}
+                  />
+                </div>
+                <div className="mt-2 text-[11px]" style={{ color: "rgba(0,0,0,0.40)", fontFamily: fontSans }}>
+                  {notesCount} {notesCount === 1 ? "note" : "notes"}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* session notes */}
+      <div className="px-6 mt-8">
+        <div
+          className="text-[11px] font-semibold tracking-[0.18em] uppercase"
+          style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}
+        >
+          SESSION NOTES
+        </div>
+
+        {notesText ? (
+          <>
+            <div
+              className="mt-3 text-[13px]"
+              style={{
+                color: "rgba(0,0,0,0.75)",
+                fontFamily: fontSans,
+                lineHeight: 1.55,
+                display: notesExpanded ? "block" : "-webkit-box",
+                WebkitLineClamp: notesExpanded ? "unset" : 5,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {notesText}
+            </div>
+
+            {!notesExpanded && notesText.length > 220 ? (
+              <button
+                onClick={() => setNotesExpanded(true)}
+                className="mt-3 text-[12px] font-semibold"
+                style={{ color: "rgba(255,77,46,0.95)", fontFamily: fontSans, WebkitTapHighlightColor: "transparent" }}
+              >
+                Read more
+              </button>
+            ) : null}
+          </>
+        ) : (
+          <div className="mt-3 text-[13px]" style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}>
+            No session notes yet.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function VaultShell() {
+  // Fonts (kept here for now; we’ll finish moving these into global CSS tokens next)
   const bodyFont =
-    '"SF Pro Text","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
-  const headerFont =
-    '"Avenir Next Rounded","Avenir Next","Avenir","SF Pro Rounded","SF Pro Display","SF Pro Text",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
+    '"Raleway", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+  const headerFont = '"Literata", serif';
 
   const palette = useMemo(
     () => ({
@@ -276,7 +257,7 @@ function VaultShell() {
       sky: "#3AA8FF",
       sun: "#FFEA3A",
       breeze: "#54E6C1",
-      accent: "rgba(255,77,46,0.95)",
+      accent: "rgba(255,77,46,0.95)", // (we’ll make this “nearly invisible” + reserve for destructive actions next pass)
       pinEdge: "rgba(0,0,0,0.14)",
     }),
     []
@@ -296,113 +277,92 @@ function VaultShell() {
     mediaNotesById,
     upsertMediaNote,
 
-    // projects
     addProject,
     renameProject,
     updateProjectBrief,
     archiveProject,
     createInvite,
 
-    // sessions
     addSession,
     renameSession,
-    updateSessionNotes,
     deleteSession,
 
-    // media
     addMediaFilesToProject,
     addMediaToProject,
     deleteMediaFromProject,
 
-    // pins
     addHotspotToMedia,
     updateHotspotInMedia,
     deleteHotspotFromMedia,
-
-    // voice
-    uploadSessionVoiceNote,
-    updateSessionVoiceTranscript,
-    clearSessionVoiceNote,
-
-    // auth
-    signOutUser,
   } = useVault();
 
   const mediaNav = useProjectMediaNavigator(activeProject, deleteMediaFromProject);
 
   const [newOpen, setNewOpen] = useState(false);
-  const [mediaOpen, setMediaOpen] = useState(false);
-  const [autoPromptMediaPicker, setAutoPromptMediaPicker] = useState(false);
+  const [focusSessionId, setFocusSessionId] = useState(null);
 
-  const [prefillSessionId, setPrefillSessionId] = useState(null);
-  const [prefillSessionTitle, setPrefillSessionTitle] = useState("");
+  // session detail routing
+  const [activeSessionId, setActiveSessionId] = useState(null);
 
-  // Voice note modal
-  const [voiceOpen, setVoiceOpen] = useState(false);
-  const [voiceSession, setVoiceSession] = useState(null);
+  const searchInputRef = useRef(null);
+  useEffect(() => {
+    if (view === "dashboard" && tab === "search") {
+      const t = setTimeout(() => searchInputRef.current?.focus(), 120);
+      return () => clearTimeout(t);
+    }
+  }, [view, tab]);
 
   const dashboardTitle = useMemo(() => {
     if (tab === "graveyard") return "Archive";
+    if (tab === "vault") return "Settings";
+    if (tab === "search") return "Search";
     return "Projects";
   }, [tab]);
 
-  const handleCreateProject = async ({ title, tags, note }) => {
-    try {
-      const p = await addProject({ title, aiTags: tags, note });
-      setNewOpen(false);
+  const setTabAndEnsureDashboard = (t) => {
+    setTab(t);
+    setView("dashboard");
+  };
 
+  const goBackFromProject = () => {
+    setView("dashboard");
+    setActiveSessionId(null);
+  };
+
+  const openSessionDetail = (session) => {
+    if (!session?.id) return;
+    setActiveSessionId(session.id);
+    setView("session");
+  };
+
+  const closeSessionDetail = () => {
+    setView("project");
+    setActiveSessionId(null);
+  };
+
+  const activeSession = useMemo(() => {
+    if (!activeProject?.sessions || !activeSessionId) return null;
+    return (activeProject.sessions || []).find((s) => s?.id === activeSessionId) || null;
+  }, [activeProject?.sessions, activeSessionId]);
+
+  // --------- Create Project ----------
+  const handleCreateProject = async ({ title, note }) => {
+    try {
+      const p = await addProject({ title: (title || "Untitled").trim(), note: (note || "").trim() });
+      setNewOpen(false);
       setActiveProject(p);
       setView("project");
 
-      setPrefillSessionId(null);
-      setPrefillSessionTitle("First Session");
-      setAutoPromptMediaPicker(true);
-      setMediaOpen(true);
+      // create first session and focus it
+      const s = await addSession(p.id, "");
+      if (s?.id) setFocusSessionId(s.id);
     } catch (e) {
       console.error(e);
+      alert(e?.message || "Could not create project.");
     }
   };
 
-  const handleAddMedia = async ({ files, sessionId, sessionTitle }) => {
-    if (!activeProject) return;
-    try {
-      if (addMediaFilesToProject) {
-        await addMediaFilesToProject(activeProject.id, files, sessionId, sessionTitle);
-      } else {
-        for (const f of (files || []).slice(0, 5)) {
-          // eslint-disable-next-line no-await-in-loop
-          await addMediaToProject(activeProject.id, f, sessionId, sessionTitle);
-        }
-      }
-    } catch (e) {
-      console.error(e);
-      alert(e?.message || "Upload failed.");
-    }
-  };
-
-  const goBackFromProject = () => setView("dashboard");
-
-  const goHome = () => {
-    setView("dashboard");
-    setActiveProject(null);
-  };
-
-  const openAddPhotosForSession = (session) => {
-    setPrefillSessionId(session?.id || null);
-    setPrefillSessionTitle(session?.title || "Session");
-    setAutoPromptMediaPicker(false);
-    setMediaOpen(true);
-  };
-
-  const openAddSession = async () => {
-    if (!activeProject?.id) return;
-    const s = await addSession(activeProject.id, "New Session");
-    setPrefillSessionId(s?.id || null);
-    setPrefillSessionTitle(s?.title || "New Session");
-    setAutoPromptMediaPicker(false);
-    setMediaOpen(true);
-  };
-
+  // --------- Project actions ----------
   const editProject = async () => {
     const next = prompt("Project name:", activeProject?.title || "");
     if (!next) return;
@@ -438,14 +398,20 @@ function VaultShell() {
     }
   };
 
-  const editSession = async (session) => {
-    const next = prompt("Session title:", session?.title || "");
-    if (!next) return;
+  // --------- Sessions ----------
+  const openAddSession = async () => {
+    if (!activeProject?.id) return;
     try {
-      await renameSession(activeProject.id, session.id, next);
+      const s = await addSession(activeProject.id, "");
+      if (s?.id) setFocusSessionId(s.id);
     } catch (e) {
-      alert(e?.message || "Could not rename session.");
+      alert(e?.message || "Could not add session.");
     }
+  };
+
+  const renameSessionInline = async (sessionId, nextTitle) => {
+    if (!activeProject?.id || !sessionId) return;
+    await renameSession(activeProject.id, sessionId, nextTitle);
   };
 
   const shareSession = async (session) => {
@@ -462,66 +428,47 @@ function VaultShell() {
     if (!confirm("Delete this session?")) return;
     try {
       await deleteSession(activeProject.id, session.id);
+      if (activeSessionId === session.id) closeSessionDetail();
     } catch (e) {
       alert(e?.message || "Could not delete session.");
     }
   };
 
-  // ---- Project Brief + Session Voice Notes wiring ----
+  // --------- Project Notes ----------
   const handleUpdateProjectBrief = async (text) => {
     if (!activeProject?.id) return;
     await updateProjectBrief?.(activeProject.id, text);
   };
 
-  const handleUpdateSessionNotes = async (session, text) => {
-    if (!activeProject?.id || !session?.id) return;
-    await updateSessionNotes?.(activeProject.id, session.id, text);
-  };
-
-  const openVoiceForSession = (session) => {
-    setVoiceSession(session || null);
-    setVoiceOpen(true);
-  };
-
-  const saveVoiceForSession = async ({ file, durationSec }) => {
-    if (!activeProject?.id || !voiceSession?.id) return;
-    await uploadSessionVoiceNote(activeProject.id, voiceSession.id, file, durationSec);
-  };
-
-  const playSessionVoice = async (session) => {
-    if (!session?.voiceNoteUrl) return;
+  // --------- Native photo picker -> upload ----------
+  const handleAddMedia = async ({ files, sessionId, sessionTitle }) => {
+    if (!activeProject) return;
     try {
-      const a = new Audio(session.voiceNoteUrl);
-      a.play();
-    } catch {
-      window.open(session.voiceNoteUrl, "_blank");
-    }
-  };
-
-  const editSessionTranscript = async (session) => {
-    const initial = session?.voiceTranscriptEdited || session?.voiceTranscriptRaw || "";
-    const next = prompt("Edit transcript:", initial);
-    if (next == null) return;
-    try {
-      await updateSessionVoiceTranscript(activeProject.id, session.id, {
-        raw: session?.voiceTranscriptRaw || "",
-        edited: next,
-        status: "ready",
-      });
+      if (addMediaFilesToProject) {
+        await addMediaFilesToProject(activeProject.id, files, sessionId, sessionTitle);
+      } else {
+        for (const f of (files || []).slice(0, 50)) {
+          // eslint-disable-next-line no-await-in-loop
+          await addMediaToProject(activeProject.id, f, sessionId, sessionTitle);
+        }
+      }
     } catch (e) {
-      alert(e?.message || "Could not update transcript.");
+      console.error(e);
+      alert(e?.message || "Upload failed.");
     }
   };
 
-  const removeSessionVoice = async (session) => {
-    if (!confirm("Remove voice note?")) return;
-    try {
-      await clearSessionVoiceNote(activeProject.id, session.id);
-    } catch (e) {
-      alert(e?.message || "Could not remove voice note.");
-    }
+  const addPhotosNative = async (session, files) => {
+    if (!activeProject?.id || !session?.id || !files?.length) return;
+    const arr = Array.from(files).slice(0, 50);
+    await handleAddMedia({
+      files: arr,
+      sessionId: session.id,
+      sessionTitle: session.title || "Untitled",
+    });
   };
 
+  // --------- Viewer delete ----------
   const handleDeleteInViewer = async () => {
     const m = mediaNav.selectedMedia;
     if (!m?.id || !m?.sessionId) return;
@@ -541,145 +488,139 @@ function VaultShell() {
     return { ...m, generalNote: note };
   }, [mediaNav.selectedMedia, mediaNotesById]);
 
+  // Navigation title/back (so the new Navigation.jsx can render consistent top bar)
+  const navTitle = useMemo(() => {
+    if (mediaNav.viewerOpen) return "Viewer";
+    if (view === "session") return "Session";
+    if (view === "project") return "Project";
+    return dashboardTitle;
+  }, [mediaNav.viewerOpen, view, dashboardTitle]);
+
+  const navBack = useMemo(() => {
+    if (mediaNav.viewerOpen) return mediaNav.closeViewer;
+    if (view === "session") return closeSessionDetail;
+    if (view === "project") return goBackFromProject;
+    return null;
+  }, [mediaNav.viewerOpen, view]);
+
   return (
     <AbstractCreamBackdrop>
       <div style={{ fontFamily: bodyFont, color: palette.ink }}>
-        <div className="max-w-6xl mx-auto">
-          <div className="relative">
-            {view === "dashboard" ? (
-              <Navigation
-                title="Index"
-                showSearch={true}
-                searchValue={search}
-                onSearchChange={(v) => setSearch(v)}
-                primaryLabel={tab === "graveyard" ? null : "New Project"}
-                onPrimary={() => setNewOpen(true)}
-                onHome={() => {
-                  setTab("library");
-                  goHome();
-                }}
-                menuItems={[
-                  {
-                    label: tab === "graveyard" ? "View projects" : "View archive",
-                    onClick: () => setTab(tab === "graveyard" ? "library" : "graveyard"),
-                  },
-                  {
-                    label: "Sign out",
-                    onClick: () => signOutUser?.(),
-                  },
-                ]}
-              />
-            ) : null}
+        <div className="max-w-6xl mx-auto relative">
+          {/* ✅ Unified nav API (new Navigation.jsx supports this cleanly) */}
+          <Navigation tab={tab} onTabChange={setTabAndEnsureDashboard} title={navTitle} onBack={navBack} />
 
-            {/* DASHBOARD */}
-            {view === "dashboard" && (
-              <div className="pt-8 pb-28">
+          {/* DASHBOARD */}
+          {view === "dashboard" && (
+            <div className="pt-6 pb-28">
+              {tab === "search" ? (
                 <div className="px-6">
+                  {/* Search input */}
                   <div
-                    className="text-[28px] font-semibold"
-                    style={{ color: "rgba(0,0,0,0.86)", letterSpacing: "-0.01em" }}
+                    className="w-full px-4 py-3 rounded-[14px]"
+                    style={{ background: "rgba(255,255,255,0.70)", border: `1px solid ${palette.line}` }}
                   >
-                    {dashboardTitle}
+                    <div
+                      className="text-[11px] font-semibold uppercase tracking-[0.18em]"
+                      style={{ color: "rgba(0,0,0,0.45)" }}
+                    >
+                      Search
+                    </div>
+                    <input
+                      ref={searchInputRef}
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Search projects or tags…"
+                      className="mt-2 w-full bg-transparent outline-none text-sm"
+                      style={{ color: "rgba(0,0,0,0.78)" }}
+                    />
+                    <div className="text-[10px] mt-1" style={{ color: "rgba(0,0,0,0.38)" }}>
+                      Try a project name or a #tag
+                    </div>
                   </div>
-                  <div className="mt-2 text-[12px]" style={{ color: "rgba(0,0,0,0.45)" }}>
-                    {tab === "graveyard" ? "Archived projects" : "Your projects"}
+
+                  <div className="mt-6">
+                    <div
+                      className="text-[11px] font-semibold uppercase tracking-[0.18em]"
+                      style={{ color: "rgba(0,0,0,0.45)" }}
+                    >
+                      Results
+                    </div>
+                    <div className="mt-3">
+                      <LibraryGrid title="" onNew={null} />
+                    </div>
                   </div>
                 </div>
+              ) : tab === "vault" ? (
+                <Settings headerFont={headerFont} palette={palette} />
+              ) : (
+                <LibraryGrid title={dashboardTitle} onNew={() => setNewOpen(true)} />
+              )}
+            </div>
+          )}
 
-                <div className="mt-6">
-                  <LibraryGrid title="" onNew={tab === "graveyard" ? null : () => setNewOpen(true)} />
-                </div>
-              </div>
-            )}
-
-            {/* PROJECT PAGE */}
-            {view === "project" && activeProject && (
-              <ProjectView
-                project={activeProject}
-                headerFont={headerFont}
-                palette={palette}
-                onBack={goBackFromProject}
-                onEditProject={editProject}
-                onShareProject={shareProject}
-                onArchiveProject={removeProject}
-                onOpenViewer={mediaNav.openViewer}
-                onAddPhotosForSession={openAddPhotosForSession}
-                onAddSession={openAddSession}
-                onEditSession={editSession}
-                onShareSession={shareSession}
-                onDeleteSession={removeSession}
-                onUpdateProjectBrief={handleUpdateProjectBrief}
-                onUpdateSessionNotes={handleUpdateSessionNotes}
-                onAddSessionVoiceNote={openVoiceForSession}
-                onPlaySessionVoiceNote={playSessionVoice}
-                onEditSessionVoiceTranscript={editSessionTranscript}
-                onClearSessionVoiceNote={removeSessionVoice}
-              />
-            )}
-
-            {/* Viewer overlay */}
-            {mediaNav.viewerOpen && activeProject && mediaWithNote && (
-              <MediaViewer
-                mode="modal"
-                project={activeProject}
-                media={mediaWithNote}
-                headerFont={headerFont}
-                palette={palette}
-                mediaIndex={Math.max(0, mediaNav.selectedIndex)}
-                mediaCount={mediaNav.flatMedia.length}
-                moreFromSession={mediaNav.moreFromSession}
-                onSelectMedia={(m) => mediaNav.openViewer(m.sessionId, m.id)}
-                onPrev={mediaNav.prevMedia}
-                onNext={mediaNav.nextMedia}
-                onSwipeDown={mediaNav.closeViewer}
-                onBack={mediaNav.closeViewer}
-                onDeleteMedia={handleDeleteInViewer}
-                onAddHotspot={addHotspotToMedia}
-                onUpdateHotspot={updateHotspotInMedia}
-                onDeleteHotspot={deleteHotspotFromMedia}
-                onUpdateMediaNote={upsertMediaNote}
-              />
-            )}
-
-            {/* Modals */}
-            <NewProjectModal open={newOpen} onClose={() => setNewOpen(false)} onCreate={handleCreateProject} />
-
-            <AddMediaModal
-              isOpen={mediaOpen}
-              onClose={() => {
-                setMediaOpen(false);
-                setAutoPromptMediaPicker(false);
-                setPrefillSessionId(null);
-                setPrefillSessionTitle("");
-              }}
+          {/* PROJECT PAGE */}
+          {view === "project" && activeProject && (
+            <ProjectView
               project={activeProject}
-              onAddMedia={(payload) =>
-                handleAddMedia({
-                  ...payload,
-                  sessionId: payload.sessionId ?? prefillSessionId,
-                  sessionTitle: payload.sessionTitle ?? prefillSessionTitle,
-                })
-              }
-              mode="upload"
-              existingSessions={activeProject?.sessions || []}
-              autoPrompt={autoPromptMediaPicker}
-              autoSubmit={autoPromptMediaPicker}
-              defaultSessionId={prefillSessionId}
-              defaultSessionTitle={prefillSessionTitle}
+              palette={palette}
+              onBack={goBackFromProject}
+              onEditProject={editProject}
+              onShareProject={shareProject}
+              onArchiveProject={removeProject}
+              onOpenViewer={mediaNav.openViewer}
+              onOpenSession={openSessionDetail}
+              onAddSession={openAddSession}
+              onRenameSession={renameSessionInline}
+              onDeleteSession={removeSession}
+              onShareSession={shareSession}
+              onUpdateProjectBrief={handleUpdateProjectBrief}
+              onAddPhotosNative={addPhotosNative}
+              autoFocusSessionId={focusSessionId}
+              onClearAutoFocusSessionId={() => setFocusSessionId(null)}
             />
+          )}
 
-            <VoiceNoteRecorderModal
-              open={voiceOpen}
+          {/* SESSION DETAIL */}
+          {view === "session" && activeProject && activeSession && (
+            <SessionDetailView
+              session={activeSession}
               palette={palette}
               headerFont={headerFont}
-              title={voiceSession?.title || "Session"}
-              onClose={() => {
-                setVoiceOpen(false);
-                setVoiceSession(null);
-              }}
-              onSave={saveVoiceForSession}
+              bodyFont={bodyFont}
+              mediaNotesById={mediaNotesById}
+              onOpenMedia={mediaNav.openViewer}
+              onDeleteSession={removeSession}
+              onShareSession={shareSession}
             />
-          </div>
+          )}
+
+          {/* Viewer overlay */}
+          {mediaNav.viewerOpen && activeProject && mediaWithNote && (
+            <MediaViewer
+              mode="modal"
+              project={activeProject}
+              media={mediaWithNote}
+              headerFont={headerFont}
+              palette={palette}
+              mediaIndex={Math.max(0, mediaNav.selectedIndex)}
+              mediaCount={mediaNav.flatMedia.length}
+              moreFromSession={mediaNav.moreFromSession}
+              onSelectMedia={(m) => mediaNav.openViewer(m.sessionId, m.id)}
+              onPrev={mediaNav.prevMedia}
+              onNext={mediaNav.nextMedia}
+              onSwipeDown={mediaNav.closeViewer}
+              onBack={mediaNav.closeViewer}
+              onDeleteMedia={handleDeleteInViewer}
+              onAddHotspot={addHotspotToMedia}
+              onUpdateHotspot={updateHotspotInMedia}
+              onDeleteHotspot={deleteHotspotFromMedia}
+              onUpdateMediaNote={upsertMediaNote}
+            />
+          )}
+
+          {/* New Project Screen */}
+          <NewProjectModal open={newOpen} onClose={() => setNewOpen(false)} onCreate={handleCreateProject} />
         </div>
       </div>
     </AbstractCreamBackdrop>

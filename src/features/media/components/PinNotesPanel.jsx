@@ -1,10 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Pencil, Plus, X } from "lucide-react";
-import SessionStrip from "./SessionStrip";
-
-function cx(...parts) {
-  return parts.filter(Boolean).join(" ");
-}
+import { Pencil, Plus, Trash2, X } from "lucide-react";
 
 function safeText(v) {
   return (v == null ? "" : String(v)).trim();
@@ -15,6 +10,7 @@ export default function PinNotesPanel({
   palette,
   projectId,
 
+  media,
   hotspots = [],
   selectedPin,
   setSelectedPinId,
@@ -24,327 +20,286 @@ export default function PinNotesPanel({
 
   openPinEditor,
   onUpdateMediaNote,
+  onDeleteHotspot,
 
-  media,
+  // optional
   moreFromSession,
   onSelectMedia,
 }) {
-  const accent = palette?.accent || "rgba(255,77,46,0.95)";
-  const line = palette?.line || "rgba(0,0,0,0.08)";
-  const ink = palette?.ink || "#0B0B0C";
+  const fontSans = "var(--font-sans)";
+  const line = "rgba(0,0,0,0.10)";
+  const hair = "rgba(0,0,0,0.06)";
+  const danger = palette?.danger || "rgba(255,77,46,0.92)";
 
   const initialNote = useMemo(() => {
-    return safeText(media?.note || media?.notes || media?.caption || "");
-  }, [media?.note, media?.notes, media?.caption]);
+    // support multiple legacy fields
+    return safeText(media?.generalNote || media?.note || media?.notes || media?.caption || "");
+  }, [media?.generalNote, media?.note, media?.notes, media?.caption, media?.id]);
 
   const [note, setNote] = useState(initialNote);
-  const [noteDirty, setNoteDirty] = useState(false);
-  const saveTimer = useRef(null);
+  const [dirty, setDirty] = useState(false);
+  const timerRef = useRef(null);
 
   useEffect(() => {
     setNote(initialNote);
-    setNoteDirty(false);
+    setDirty(false);
   }, [initialNote, media?.id]);
 
   const scheduleSave = (next) => {
     if (!onUpdateMediaNote || !media?.id) return;
-    setNoteDirty(true);
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
+    setDirty(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+
+    timerRef.current = setTimeout(async () => {
       try {
         await onUpdateMediaNote?.(projectId, media?.sessionId, media?.id, next);
       } catch (e) {
         console.error("Failed to save media note", e);
       } finally {
-        setNoteDirty(false);
+        setDirty(false);
       }
-    }, 450);
+    }, 520);
   };
 
   useEffect(() => {
-    return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-    };
+    return () => timerRef.current && clearTimeout(timerRef.current);
   }, []);
 
-  const hasAnyAnnotations = Array.isArray(hotspots) && hotspots.length > 0;
-
-  const annotationNotes = useMemo(() => {
-    const list = (hotspots || []).map((h, idx) => {
-      const text = safeText(h?.note || h?.label || "");
-      return { ...h, _index: idx + 1, _text: text };
-    });
-    return {
-      all: list,
-      withText: list.filter((a) => a._text),
-    };
+  const annotations = useMemo(() => {
+    const list = (Array.isArray(hotspots) ? hotspots : []).map((h, idx) => ({
+      ...h,
+      _index: idx + 1,
+      _text: safeText(h?.note || h?.label || ""),
+    }));
+    return list;
   }, [hotspots]);
 
-  const [showAnnotationsPanel, setShowAnnotationsPanel] = useState(false);
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const addWrapRef = useRef(null);
+  const selected = useMemo(() => {
+    if (!selectedPin?.id) return null;
+    return annotations.find((a) => a.id === selectedPin.id) || null;
+  }, [selectedPin?.id, annotations]);
 
-  useEffect(() => {
-    if (!addMenuOpen) return;
-    const onDown = (e) => {
-      const root = addWrapRef.current;
-      const target = e.target;
-      if (!root || !target) return;
-      if (!root.contains(target)) setAddMenuOpen(false);
-    };
-    window.addEventListener("pointerdown", onDown, { capture: true });
-    return () => window.removeEventListener("pointerdown", onDown, { capture: true });
-  }, [addMenuOpen]);
-
-  useEffect(() => {
-    if (isAddPinMode) setShowAnnotationsPanel(false);
-  }, [isAddPinMode]);
-
-  useEffect(() => {
-    if (!hasAnyAnnotations) setShowAnnotationsPanel(false);
-  }, [hasAnyAnnotations]);
+  const hasPins = annotations.length > 0;
 
   return (
     <div className="px-5 pt-4 pb-8">
-      <div className="flex items-center justify-between">
-        <div
-          className="text-[12px] font-semibold tracking-[0.18em]"
-          style={{ color: "rgba(0,0,0,0.62)", fontFamily: headerFont }}
-        >
-          NOTES
-        </div>
-
-        <div className="relative" ref={addWrapRef}>
-          <button
-            onClick={() => setAddMenuOpen((v) => !v)}
-            className="inline-flex items-center gap-2 text-[12px] font-semibold tracking-[0.12em]"
-            style={{ color: accent, WebkitTapHighlightColor: "transparent" }}
-            aria-label="Add"
-          >
-            <Plus className="w-4 h-4" />
-            ADD
-          </button>
-
-          {addMenuOpen && (
-            <div className="absolute right-0 mt-2 w-[210px]" style={{ zIndex: 50 }}>
-              <div
-                className="p-1"
-                style={{
-                  background: "rgba(255,255,255,0.92)",
-                  border: `1px solid ${line}`,
-                  borderRadius: 8,
-                  boxShadow: "0 18px 36px -28px rgba(0,0,0,0.35)",
-                  backdropFilter: "blur(10px)",
-                }}
-              >
-                <button
-                  onClick={() => {
-                    setAddMenuOpen(false);
-                    if (!isAddPinMode) toggleAddPinMode?.();
-                  }}
-                  className="w-full text-left px-3 py-2 text-[13px] font-semibold"
-                  style={{ color: "rgba(0,0,0,0.78)" }}
-                >
-                  Add annotation
-                  <div className="text-[11px] mt-0.5" style={{ color: "rgba(0,0,0,0.45)" }}>
-                    Optional — tap the photo to place it
-                  </div>
-                </button>
-
-                <div style={{ height: 1, background: "rgba(0,0,0,0.06)" }} />
-
-                <button
-                  onClick={() => {
-                    setAddMenuOpen(false);
-                    document.getElementById("index-photo-notes")?.focus?.();
-                  }}
-                  className="w-full text-left px-3 py-2 text-[13px] font-semibold"
-                  style={{ color: "rgba(0,0,0,0.78)" }}
-                >
-                  Add note
-                  <div className="text-[11px] mt-0.5" style={{ color: "rgba(0,0,0,0.45)" }}>
-                    General notes for the whole photo
-                  </div>
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      {/* GENERAL NOTES */}
+      <div className="label-caps">General notes</div>
 
       <div
         className="mt-3"
         style={{
-          borderRadius: 8,
-          border: `1px solid ${line}`,
-          background: "rgba(255,255,255,0.92)",
+          borderRadius: 14,
+          border: `1px solid ${hair}`,
+          background: "rgba(255,255,255,0.78)",
         }}
       >
         <textarea
-          id="index-photo-notes"
           value={note}
           onChange={(e) => {
             const next = e.target.value;
             setNote(next);
             scheduleSave(next);
           }}
-          rows={note ? 3 : 2}
-          placeholder="Add general notes for this photo (optional)…"
-          className="w-full bg-transparent outline-none resize-none px-3 py-3 text-[13px] leading-relaxed"
-          style={{ color: "rgba(0,0,0,0.78)" }}
+          onBlur={() => {
+            // flush-ish
+            if (onUpdateMediaNote && media?.id) {
+              scheduleSave(note);
+            }
+          }}
+          rows={note ? 4 : 3}
+          placeholder="Optional — add a general note for this photo."
+          className="w-full bg-transparent outline-none resize-none text-[13px]"
+          style={{
+            color: "rgba(0,0,0,0.78)",
+            padding: 14,
+            lineHeight: 1.55,
+            fontFamily: fontSans,
+          }}
         />
 
-        <div className="px-3 pb-3 text-[11px]" style={{ color: "rgba(0,0,0,0.40)" }}>
-          {noteDirty ? "Saving…" : "Optional — you can keep notes without annotations."}
+        <div className="px-4 pb-3 text-[11px]" style={{ color: "rgba(0,0,0,0.38)", fontFamily: fontSans }}>
+          {dirty ? "Saving…" : "You can keep notes without annotations."}
         </div>
       </div>
 
-      {isAddPinMode && (
-        <div
-          className="mt-3 flex items-center justify-between"
-          style={{
-            borderRadius: 8,
-            border: `1px solid ${line}`,
-            background: "rgba(0,0,0,0.03)",
-            padding: "10px 12px",
-          }}
-        >
-          <div className="text-[12px] font-semibold" style={{ color: "rgba(0,0,0,0.72)" }}>
-            Tap anywhere on the photo to place an annotation.
-          </div>
+      {/* ANNOTATIONS HEADER */}
+      <div className="mt-7 flex items-center justify-between">
+        <div className="label-caps">Annotations {hasPins ? `· ${annotations.length}` : ""}</div>
+
+        {!isAddPinMode ? (
+          <button
+            onClick={() => {
+              toggleAddPinMode?.();
+              setSelectedPinId?.(null);
+            }}
+            className="h-9 px-3 rounded-[999px] inline-flex items-center gap-2 active:scale-[0.99] transition-transform"
+            style={{
+              background: "rgba(255,255,255,0.76)",
+              border: `1px solid ${line}`,
+              color: "rgba(0,0,0,0.70)",
+              WebkitTapHighlightColor: "transparent",
+              fontFamily: fontSans,
+            }}
+            aria-label="Add annotation"
+            title="Add annotation"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="text-[12px] font-semibold uppercase" style={{ letterSpacing: "0.16em" }}>
+              Add
+            </span>
+          </button>
+        ) : (
           <button
             onClick={() => toggleAddPinMode?.()}
-            className="w-9 h-9 grid place-items-center"
+            className="w-10 h-10 grid place-items-center rounded-[12px] active:scale-[0.98] transition-transform"
             style={{
-              borderRadius: 8,
+              background: "rgba(255,255,255,0.76)",
               border: `1px solid ${line}`,
-              background: "rgba(255,255,255,0.85)",
+              WebkitTapHighlightColor: "transparent",
             }}
-            aria-label="Cancel"
+            aria-label="Cancel add annotation"
             title="Cancel"
           >
-            <X className="w-4 h-4" style={{ color: "rgba(0,0,0,0.55)" }} />
+            <X className="w-5 h-5" style={{ color: "rgba(0,0,0,0.70)" }} />
           </button>
+        )}
+      </div>
+
+      {/* Add mode hint */}
+      {isAddPinMode ? (
+        <div
+          className="mt-3"
+          style={{
+            borderRadius: 14,
+            border: `1px solid ${hair}`,
+            background: "rgba(0,0,0,0.03)",
+            padding: "12px 14px",
+            color: "rgba(0,0,0,0.70)",
+            fontFamily: fontSans,
+            fontSize: 13,
+            lineHeight: 1.45,
+          }}
+        >
+          Tap anywhere on the photo to place an annotation. (Optional)
         </div>
-      )}
+      ) : null}
 
-      {hasAnyAnnotations && !isAddPinMode && (
-        <div className="mt-5">
-          <button
-            onClick={() => setShowAnnotationsPanel((v) => !v)}
-            className="w-full flex items-center justify-between"
-            style={{ WebkitTapHighlightColor: "transparent" }}
-            aria-label="Toggle annotations"
-          >
-            <div
-              className="text-[12px] font-semibold tracking-[0.18em]"
-              style={{ color: "rgba(0,0,0,0.62)", fontFamily: headerFont }}
-            >
-              ANNOTATIONS · {hotspots.length}
+      {/* Pins list */}
+      {!hasPins ? (
+        <div className="mt-3 text-[13px]" style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}>
+          No annotations yet.
+        </div>
+      ) : (
+        <>
+          {/* quick chips */}
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+            <style>{`.hide-scroll::-webkit-scrollbar{ display:none; }`}</style>
+            <div className="flex gap-2 hide-scroll">
+              {annotations.map((a) => {
+                const active = a.id === selectedPin?.id;
+                return (
+                  <button
+                    key={a.id}
+                    onClick={() => setSelectedPinId?.(a.id)}
+                    className="shrink-0 h-9 px-3 rounded-[999px] text-[12px] font-semibold transition-colors"
+                    style={{
+                      background: active ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.78)",
+                      color: "rgba(0,0,0,0.72)",
+                      border: `1px solid ${active ? "rgba(0,0,0,0.18)" : hair}`,
+                      WebkitTapHighlightColor: "transparent",
+                      fontFamily: fontSans,
+                      letterSpacing: "0.10em",
+                    }}
+                    aria-label={`Annotation ${a._index}`}
+                    title={`Annotation ${a._index}`}
+                  >
+                    #{a._index}
+                  </button>
+                );
+              })}
             </div>
-            <div className="text-[12px] font-semibold" style={{ color: "rgba(0,0,0,0.55)" }}>
-              {showAnnotationsPanel ? "HIDE" : "SHOW"}
-            </div>
-          </button>
-
-          <div className="mt-2 flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-            {annotationNotes.all.map((a) => {
-              const active = a.id === selectedPin?.id;
-              return (
-                <button
-                  key={a.id}
-                  onClick={() => {
-                    setShowAnnotationsPanel(true);
-                    setSelectedPinId?.(a.id);
-                  }}
-                  className={cx(
-                    "shrink-0 h-8 px-3 rounded-[8px] text-[12px] font-semibold transition-colors duration-200 ease-out"
-                  )}
-                  style={{
-                    background: active ? "rgba(255,77,46,0.14)" : "rgba(255,255,255,0.92)",
-                    color: ink,
-                    border: active ? `1px solid rgba(255,77,46,0.45)` : `1px solid ${line}`,
-                  }}
-                  aria-label={`Annotation ${a._index}`}
-                >
-                  {a._index}
-                </button>
-              );
-            })}
           </div>
 
-          {showAnnotationsPanel && (
-            <div className="mt-3 space-y-2">
-              {annotationNotes.withText.length === 0 ? (
-                <div className="text-[13px]" style={{ color: "rgba(0,0,0,0.55)" }}>
-                  Annotations are optional — add a note to any marker if you want.
+          {/* selected detail */}
+          {selected ? (
+            <div
+              className="mt-4"
+              style={{
+                borderRadius: 14,
+                border: `1px solid ${hair}`,
+                background: "rgba(255,255,255,0.78)",
+                padding: 14,
+              }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div
+                    className="text-[12px] font-semibold uppercase"
+                    style={{ color: "rgba(0,0,0,0.45)", letterSpacing: "0.18em", fontFamily: fontSans }}
+                  >
+                    Annotation #{selected._index}
+                  </div>
+
+                  <div className="mt-2 text-[13px]" style={{ color: "rgba(0,0,0,0.78)", fontFamily: fontSans, lineHeight: 1.55 }}>
+                    {selected._text ? (
+                      selected._text
+                    ) : (
+                      <span style={{ color: "rgba(0,0,0,0.35)" }}>No note yet. (Optional)</span>
+                    )}
+                  </div>
                 </div>
-              ) : (
-                annotationNotes.all.map((a) => {
-                  const isSelected = a.id === selectedPin?.id;
 
-                  return (
-                    <div
-                      key={a.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setSelectedPinId?.(a.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          setSelectedPinId?.(a.id);
-                        }
-                      }}
-                      className="w-full flex items-start gap-3 text-left cursor-pointer select-none"
-                      style={{ WebkitTapHighlightColor: "transparent" }}
-                      aria-label={`Annotation ${a._index}`}
-                    >
-                      <div
-                        className="mt-[2px] w-6 h-6 rounded-full grid place-items-center text-[12px] font-semibold"
-                        style={{
-                          background: "rgba(255,255,255,0.95)",
-                          border: isSelected ? `2px solid ${accent}` : `1px solid ${line}`,
-                          color: "rgba(0,0,0,0.70)",
-                        }}
-                      >
-                        {a._index}
-                      </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => openPinEditor?.(selected)}
+                    className="w-10 h-10 grid place-items-center rounded-[12px] active:scale-[0.98] transition-transform"
+                    style={{
+                      background: "rgba(255,255,255,0.82)",
+                      border: `1px solid ${line}`,
+                      WebkitTapHighlightColor: "transparent",
+                    }}
+                    aria-label="Edit annotation"
+                    title="Edit"
+                  >
+                    <Pencil className="w-5 h-5" style={{ color: "rgba(0,0,0,0.70)" }} />
+                  </button>
 
-                      <div className="flex-1 text-[13px] leading-relaxed" style={{ color: "rgba(0,0,0,0.75)" }}>
-                        {a._text ? a._text : <span style={{ color: "rgba(0,0,0,0.35)" }}>No annotation note.</span>}
-                      </div>
-
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          openPinEditor?.(a);
-                        }}
-                        className="mt-[1px] w-8 h-8 rounded-[8px] grid place-items-center"
-                        style={{
-                          border: `1px solid ${line}`,
-                          background: "rgba(255,255,255,0.9)",
-                        }}
-                        aria-label="Edit annotation"
-                        title="Edit"
-                      >
-                        <Pencil className="w-4 h-4" style={{ color: "rgba(0,0,0,0.55)" }} />
-                      </button>
-                    </div>
-                  );
-                })
-              )}
+                  <button
+                    onClick={() => {
+                      if (!selected?.id) return;
+                      const ok = window.confirm("Delete this annotation?");
+                      if (!ok) return;
+                      onDeleteHotspot?.(selected.id);
+                      setSelectedPinId?.(null);
+                    }}
+                    className="w-10 h-10 grid place-items-center rounded-[12px] active:scale-[0.98] transition-transform"
+                    style={{
+                      background: "rgba(255,255,255,0.82)",
+                      border: `1px solid ${line}`,
+                      WebkitTapHighlightColor: "transparent",
+                    }}
+                    aria-label="Delete annotation"
+                    title="Delete"
+                  >
+                    <Trash2 className="w-5 h-5" style={{ color: danger }} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 text-[13px]" style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}>
+              Select an annotation to view or edit its note.
             </div>
           )}
-        </div>
+        </>
       )}
 
-      <SessionStrip
-        headerFont={headerFont}
-        media={media}
-        moreFromSession={moreFromSession}
-        onSelectMedia={onSelectMedia}
-      />
+      {/* (Optional) future: session strip / related thumbnails
+          Keep the props here so nothing breaks, but we won’t render it yet. */}
+      {Array.isArray(moreFromSession) && moreFromSession.length > 0 && typeof onSelectMedia === "function" ? (
+        <div className="mt-8" />
+      ) : null}
     </div>
   );
 }

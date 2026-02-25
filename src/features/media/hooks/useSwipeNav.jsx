@@ -8,7 +8,7 @@ export default function useSwipeNav({
   onSwipeDown,
   isBlocked = false,
   stageRef = null,
-  animationMs = 300,
+  animationMs = 280,
   canPrev = true,
   canNext = true,
   gapPx = 16,
@@ -18,46 +18,54 @@ export default function useSwipeNav({
     x0: 0,
     y0: 0,
     t0: 0,
-    axis: null,
+    axis: null, // "x" | "y"
     pointerId: null,
     lastDx: 0,
   });
 
   const rafRef = useRef({
     id: 0,
-    x: 0,
-    transition: "none",
     pending: false,
+    x: 0,
   });
+
+  const timeoutsRef = useRef([]);
+
+  const clearTimers = () => {
+    for (const t of timeoutsRef.current) clearTimeout(t);
+    timeoutsRef.current = [];
+  };
 
   const getStageWidth = () => {
     const w = stageRef?.current?.clientWidth;
     return typeof w === "number" && w > 0 ? w : window.innerWidth;
   };
 
-  const setTransform = (x, transition = "none") => {
+  const setTransformImmediate = (x) => {
     const el = carouselRef?.current;
     if (!el) return;
+    el.style.transition = "none";
+    el.style.transform = `translate3d(${x}px,0,0)`;
+    el.style.willChange = "transform";
+  };
 
-    // Direct set for animated transitions; RAF-throttle for drag updates.
-    if (transition !== "none") {
-      el.style.transition = transition;
-      el.style.transform = `translate3d(${x}px, 0, 0)`;
-      return;
-    }
-
+  const setTransformRaf = (x) => {
     rafRef.current.x = x;
-    rafRef.current.transition = transition;
     if (rafRef.current.pending) return;
     rafRef.current.pending = true;
 
     rafRef.current.id = requestAnimationFrame(() => {
       rafRef.current.pending = false;
-      const el2 = carouselRef?.current;
-      if (!el2) return;
-      el2.style.transition = "none";
-      el2.style.transform = `translate3d(${rafRef.current.x}px, 0, 0)`;
+      setTransformImmediate(rafRef.current.x);
     });
+  };
+
+  const setTransformAnimated = (x, transition) => {
+    const el = carouselRef?.current;
+    if (!el) return;
+    el.style.willChange = "transform";
+    el.style.transition = transition;
+    el.style.transform = `translate3d(${x}px,0,0)`;
   };
 
   const reset = () => {
@@ -65,13 +73,24 @@ export default function useSwipeNav({
     swipeRef.current.axis = null;
     swipeRef.current.pointerId = null;
     swipeRef.current.lastDx = 0;
-    setTransform(0, "none");
+    clearTimers();
+    setTransformImmediate(0);
   };
 
   useEffect(() => {
     if (isBlocked) reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isBlocked]);
+
+  useEffect(() => {
+    return () => {
+      try {
+        if (rafRef.current.id) cancelAnimationFrame(rafRef.current.id);
+      } catch {}
+      clearTimers();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const rubberBand = (dx, dimension) => {
     const d = Math.abs(dx);
@@ -80,9 +99,17 @@ export default function useSwipeNav({
     return sign * ((c * d) / (c + d));
   };
 
+  const isMultiTouch = (e) => {
+    const t = e?.touches;
+    return t && t.length && t.length > 1;
+  };
+
   const onPointerDown = (e) => {
     if (!enabled || isBlocked) return;
-    if (e.target.closest("button") || e.target.closest("[data-noswipe]")) return;
+    if (isMultiTouch(e)) return;
+
+    // Let UI controls be clickable; swipes should start on the stage itself.
+    if (e?.target?.closest?.("button") || e?.target?.closest?.("[data-noswipe]")) return;
 
     const x = e.clientX ?? e.touches?.[0]?.clientX;
     const y = e.clientY ?? e.touches?.[0]?.clientY;
@@ -96,16 +123,24 @@ export default function useSwipeNav({
     swipeRef.current.pointerId = e.pointerId ?? null;
     swipeRef.current.lastDx = 0;
 
-    setTransform(0, "none");
+    clearTimers();
+    setTransformImmediate(0);
 
+    // Pointer capture helps consistency on mobile + desktop
     try {
-      e.currentTarget?.setPointerCapture?.(e.pointerId);
+      if (e.pointerId != null) e.currentTarget?.setPointerCapture?.(e.pointerId);
     } catch {}
   };
 
   const onPointerMove = (e) => {
     if (!enabled || isBlocked) return;
     if (!swipeRef.current.down) return;
+    if (isMultiTouch(e)) return;
+
+    // Ignore moves from other pointers
+    if (swipeRef.current.pointerId != null && e.pointerId != null && e.pointerId !== swipeRef.current.pointerId) {
+      return;
+    }
 
     const x = e.clientX ?? e.touches?.[0]?.clientX;
     const y = e.clientY ?? e.touches?.[0]?.clientY;
@@ -121,13 +156,13 @@ export default function useSwipeNav({
       swipeRef.current.axis = adx > ady ? "x" : "y";
     }
 
+    // If vertical, let it go (for swipe down gesture)
     if (swipeRef.current.axis === "y") {
-      setTransform(0, "none");
+      setTransformImmediate(0);
       return;
     }
 
-    // We are committing to horizontal swipe: stop the browser/page scroll.
-    // This is the core fix for “fast swipe turns into vertical jump”.
+    // We are horizontal: prevent browser scroll / bounce
     try {
       e.preventDefault?.();
     } catch {}
@@ -144,43 +179,64 @@ export default function useSwipeNav({
     const clamped = Math.max(-max, Math.min(max, dx));
 
     swipeRef.current.lastDx = clamped;
-    setTransform(clamped, "none");
+    setTransformRaf(clamped);
   };
 
   const springBack = (fromDx) => {
+    // Slight overshoot then settle
     const overshoot = Math.max(-40, Math.min(40, -fromDx * 0.12));
-    setTransform(overshoot, `transform ${animationMs * 0.7}ms cubic-bezier(0.25, 1, 0.5, 1)`);
+    setTransformAnimated(overshoot, `transform ${Math.round(animationMs * 0.7)}ms cubic-bezier(.16,1,.3,1)`);
 
-    setTimeout(() => {
-      setTransform(0, `transform ${animationMs * 0.5}ms ease-out`);
-      setTimeout(() => reset(), animationMs * 0.5 + 20);
-    }, animationMs * 0.7 + 20);
+    const t1 = setTimeout(() => {
+      setTransformAnimated(0, `transform ${Math.round(animationMs * 0.55)}ms cubic-bezier(.16,1,.3,1)`);
+      const t2 = setTimeout(() => reset(), Math.round(animationMs * 0.55) + 24);
+      timeoutsRef.current.push(t2);
+    }, Math.round(animationMs * 0.7) + 24);
+
+    timeoutsRef.current.push(t1);
   };
 
   const commitSlide = (dir, w) => {
-    // Travel full width PLUS the gap (prevents the “gap snap” jolt)
+    // dir: 1 = next (left), -1 = prev (right)
     const targetX = dir === 1 ? -(w + gapPx) : w + gapPx;
-    setTransform(targetX, `transform ${animationMs}ms cubic-bezier(0.25, 1, 0.45, 1)`);
+    setTransformAnimated(targetX, `transform ${animationMs}ms cubic-bezier(.16,1,.3,1)`);
 
-    setTimeout(() => {
+    const t = setTimeout(() => {
       if (dir === 1) onNext?.();
       else onPrev?.();
       reset();
-    }, animationMs + 20);
+    }, animationMs + 24);
+
+    timeoutsRef.current.push(t);
   };
 
   const onPointerEnd = (e) => {
     if (!enabled || isBlocked) return;
     if (!swipeRef.current.down) return;
 
+    // Ignore other pointers
+    if (swipeRef.current.pointerId != null && e.pointerId != null && e.pointerId !== swipeRef.current.pointerId) {
+      return;
+    }
+
     swipeRef.current.down = false;
 
-    const x = e.clientX ?? e.changedTouches?.[0]?.clientX ?? e.touches?.[0]?.clientX ?? null;
-    const y = e.clientY ?? e.changedTouches?.[0]?.clientY ?? e.touches?.[0]?.clientY ?? null;
+    const x =
+      e.clientX ??
+      e.changedTouches?.[0]?.clientX ??
+      e.touches?.[0]?.clientX ??
+      null;
+
+    const y =
+      e.clientY ??
+      e.changedTouches?.[0]?.clientY ??
+      e.touches?.[0]?.clientY ??
+      null;
 
     const dx = x == null ? swipeRef.current.lastDx : x - swipeRef.current.x0;
     const dy = y == null ? 0 : y - swipeRef.current.y0;
 
+    // Swipe down to close
     if (dy > 90 && Math.abs(dy) > Math.abs(dx) * 1.25) {
       reset();
       onSwipeDown?.();
@@ -194,7 +250,7 @@ export default function useSwipeNav({
 
     const w = getStageWidth();
     const dt = Math.max(1, performance.now() - swipeRef.current.t0);
-    const v = dx / dt;
+    const v = dx / dt; // px/ms
 
     const goingNext = dx < 0;
     const goingPrev = dx > 0;

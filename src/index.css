@@ -1,3 +1,59 @@
+/* --- Fonts (make sure you load them in index.html; snippet below) --- */
+:root{
+  /* Core */
+  --bg: #FFFEFA;
+  --paper: rgba(255,255,255,0.86);
+  --ink: rgba(0,0,0,0.88);
+  --muted: rgba(0,0,0,0.50);
+  --hairline: rgba(0,0,0,0.06);
+  --line: rgba(0,0,0,0.10);
+
+  /* Radii + spacing */
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+
+  /* Accent (nearly invisible) */
+  --accent: rgba(0,0,0,0.06);      /* subtle active */
+  --danger: rgba(255,77,46,0.92);  /* destructive only */
+
+  /* Typography */
+  --font-sans: "Raleway", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-serif: "Literata", ui-serif, Georgia, "Times New Roman", serif;
+}
+
+/* App defaults */
+html, body{
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.label-caps{
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Very light grain: only visible on empty areas */
+.index-grain{
+  position: relative;
+}
+.index-grain::before{
+  content:"";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.035; /* VERY LIGHT */
+  background:
+    radial-gradient(circle at 20% 10%, rgba(0,0,0,0.12) 0.5px, transparent 0.6px) 0 0 / 18px 18px,
+    radial-gradient(circle at 80% 60%, rgba(0,0,0,0.10) 0.5px, transparent 0.6px) 0 0 / 22px 22px;
+}
+
 @import "tailwindcss";
 
 /* your custom CSS below if any */
