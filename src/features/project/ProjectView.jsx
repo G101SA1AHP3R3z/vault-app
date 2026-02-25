@@ -110,12 +110,8 @@ function ThumbStrip({ thumbs, onOpen }) {
         scrollbarWidth: "none",
         WebkitOverflowScrolling: "touch",
       }}
-      onClick={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
     >
-      <style>{`
-        .index-hide-scroll::-webkit-scrollbar{ display:none; }
-      `}</style>
+      <style>{`.index-hide-scroll::-webkit-scrollbar{ display:none; }`}</style>
 
       <div className="flex gap-2 index-hide-scroll">
         {thumbs.map((m) => (
@@ -154,13 +150,29 @@ function ThumbStrip({ thumbs, onOpen }) {
   );
 }
 
-/** Accessible clickable wrapper that can contain real buttons */
+/**
+ * Clickable card that is *reliable*:
+ * - If you click on interactive elements (button/input/link/etc), it does NOT open the session.
+ * - If you click on any other area inside the card, it opens.
+ */
 function ClickCard({ onOpen, children }) {
+  const shouldIgnore = (target) => {
+    if (!target || typeof target.closest !== "function") return false;
+    return !!target.closest("button,a,input,textarea,select,summary,[data-noopen]");
+  };
+
+  const handleOpen = (e) => {
+    // If any child called preventDefault (or it's interactive), do nothing
+    if (e.defaultPrevented) return;
+    if (shouldIgnore(e.target)) return;
+    onOpen?.();
+  };
+
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={() => onOpen?.()}
+      onClick={handleOpen}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -168,7 +180,10 @@ function ClickCard({ onOpen, children }) {
         }
       }}
       className="w-full text-left outline-none"
-      style={{ WebkitTapHighlightColor: "transparent" }}
+      style={{
+        WebkitTapHighlightColor: "transparent",
+        cursor: "pointer",
+      }}
     >
       {children}
     </div>
@@ -182,40 +197,29 @@ export default function ProjectView({
   onShareProject,
   onArchiveProject,
 
-  // NEW: wedding date
-  onUpdateWeddingDate, // (dateStrOrNull) => Promise<void>
+  onUpdateWeddingDate,
 
-  // viewer
   onOpenViewer,
+  onOpenSession,
 
-  // session detail
-  onOpenSession, // (session) => void
-
-  // sessions
   onAddSession,
   onRenameSession,
   onDeleteSession,
   onShareSession,
 
-  // notes
   onUpdateProjectBrief,
-
-  // native picker upload
   onAddPhotosNative,
 
-  // focus newly-created session title input
   autoFocusSessionId,
   onClearAutoFocusSessionId,
 }) {
   if (!project) return null;
 
-  // Sessions newest first
   const sessions = useMemo(() => {
     const s = Array.isArray(project?.sessions) ? project.sessions : [];
     return s.slice().sort((a, b) => (b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0));
   }, [project?.sessions]);
 
-  // Wedding date display
   const dateText =
     formatDateMMDDYYYY(project?.weddingDate) ||
     (typeof project?.weddingDate === "string" ? project.weddingDate : "");
@@ -260,7 +264,7 @@ export default function ProjectView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notesDraft]);
 
-  // Inline rename drafts
+  // Inline session title drafts
   const [titleDrafts, setTitleDrafts] = useState({});
   useEffect(() => {
     setTitleDrafts((prev) => {
@@ -370,7 +374,6 @@ export default function ProjectView({
 
   return (
     <div className="pt-6 pb-28">
-      {/* hidden native picker */}
       <input
         ref={fileInputRef}
         type="file"
@@ -503,8 +506,6 @@ export default function ProjectView({
                               if (el) sessionInputRefs.current[session.id] = el;
                             }}
                             value={displayDraft}
-                            onClick={(e) => e.stopPropagation()}
-                            onPointerDown={(e) => e.stopPropagation()}
                             onChange={(e) => setTitleDrafts((p) => ({ ...p, [session.id]: e.target.value }))}
                             onBlur={() => commitSessionTitle(session)}
                             onKeyDown={(e) => {
@@ -530,20 +531,12 @@ export default function ProjectView({
                           </div>
                         </div>
 
-                        {sessionMenuItems.length ? (
-                          <div onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-                            <KebabMenu items={sessionMenuItems} />
-                          </div>
-                        ) : null}
+                        {sessionMenuItems.length ? <KebabMenu items={sessionMenuItems} /> : null}
                       </div>
 
                       <ThumbStrip thumbs={thumbs} onOpen={(m) => onOpenViewer?.(session.id, m.id)} />
 
-                      <div
-                        className="mt-4 flex items-center justify-between"
-                        onClick={(e) => e.stopPropagation()}
-                        onPointerDown={(e) => e.stopPropagation()}
-                      >
+                      <div className="mt-4 flex items-center justify-between">
                         <button
                           type="button"
                           onClick={(e) => {
