@@ -1,6 +1,6 @@
 // /src/components/Navigation.jsx
 import React, { useEffect, useRef, useState } from "react";
-import { Menu, X, ChevronLeft, Archive, Settings, Search } from "lucide-react";
+import { Menu, X, Archive, Settings, Search } from "lucide-react";
 
 function TopBar({ onOpenMenu }) {
   return (
@@ -40,27 +40,35 @@ function TopBar({ onOpenMenu }) {
   );
 }
 
-function BackRow({ onBack }) {
-  if (!onBack) return null;
+function BackRow({ onBack, rightSlot }) {
+  if (!onBack && !rightSlot) return null;
+
   return (
-    <div className="px-6 pt-3">
-      <button
-        onClick={onBack}
-        className="h-9 px-3 rounded-[999px] inline-flex items-center gap-2 active:scale-[0.99] transition-transform"
-        style={{
-          background: "rgba(255,255,255,0.76)",
-          border: "1px solid rgba(0,0,0,0.10)",
-          color: "rgba(0,0,0,0.70)",
-          WebkitTapHighlightColor: "transparent",
-        }}
-        aria-label="Back"
-        title="Back"
-      >
-        <ChevronLeft className="w-4 h-4" />
-        <span className="text-[12px] font-semibold uppercase" style={{ letterSpacing: "0.16em" }}>
-          Back
-        </span>
-      </button>
+    <div className="px-6 pt-3 flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        {onBack ? (
+          <button
+            onClick={onBack}
+            className="h-9 px-3 rounded-[999px] inline-flex items-center gap-2 active:scale-[0.99] transition-transform"
+            style={{
+              background: "rgba(255,255,255,0.76)",
+              border: "1px solid rgba(0,0,0,0.10)",
+              color: "rgba(0,0,0,0.70)",
+              WebkitTapHighlightColor: "transparent",
+            }}
+            aria-label="Back"
+            title="Back"
+          >
+            <span className="text-[12px] font-semibold uppercase" style={{ letterSpacing: "0.16em" }}>
+              ← Back
+            </span>
+          </button>
+        ) : (
+          <div />
+        )}
+      </div>
+
+      {rightSlot ? <div className="shrink-0">{rightSlot}</div> : <div />}
     </div>
   );
 }
@@ -84,19 +92,78 @@ function DrawerItem({ label, active, onClick }) {
   );
 }
 
+function MobilePillNav({ tab, onTabChange }) {
+  const isActive = (id) => tab === id;
 
-/**
- * Props supported (backward compatible):
- * - New: { tab, onTabChange, onBack }
- * - Old: { currentTab, setTab }
- *
- * NOTE: We intentionally DO NOT show page titles under [ INDEX ].
- * Back button renders BELOW the header (BackRow).
- */
+  const IconBtn = ({ id, label, children }) => (
+    <button
+      onClick={() => onTabChange?.(id)}
+      className="w-11 h-11 grid place-items-center rounded-[12px] active:scale-[0.98] transition-transform"
+      style={{ background: isActive(id) ? "rgba(0,0,0,0.04)" : "transparent" }}
+      aria-label={label}
+      title={label}
+    >
+      {children}
+    </button>
+  );
+
+  return (
+    <div className="md:hidden fixed bottom-8 inset-x-0 z-50 pointer-events-none">
+      <div className="max-w-md mx-auto px-6 flex items-end justify-between">
+        <div
+          className="pointer-events-auto flex items-center gap-1 px-2 py-2"
+          style={{
+            borderRadius: 14,
+            background: "rgba(255,255,255,0.92)",
+            border: "1px solid rgba(0,0,0,0.10)",
+            boxShadow: "0 18px 45px -40px rgba(0,0,0,0.35)",
+            backdropFilter: "blur(18px)",
+          }}
+        >
+          <IconBtn id="library" label="Projects">
+            <div
+              className="text-[11px] font-semibold tracking-[0.16em] uppercase"
+              style={{ color: isActive("library") ? "rgba(0,0,0,0.82)" : "rgba(0,0,0,0.45)" }}
+            >
+              P
+            </div>
+          </IconBtn>
+
+          <IconBtn id="graveyard" label="Archive">
+            <Archive className="w-5 h-5" style={{ color: isActive("graveyard") ? "rgba(0,0,0,0.82)" : "rgba(0,0,0,0.45)" }} />
+          </IconBtn>
+
+          <IconBtn id="vault" label="Settings">
+            <Settings className="w-5 h-5" style={{ color: isActive("vault") ? "rgba(0,0,0,0.82)" : "rgba(0,0,0,0.45)" }} />
+          </IconBtn>
+        </div>
+
+        <button
+          onClick={() => onTabChange?.("search")}
+          className="pointer-events-auto w-12 h-12 grid place-items-center rounded-[14px] active:scale-[0.98] transition-transform"
+          style={{
+            background: "rgba(255,255,255,0.92)",
+            border: "1px solid rgba(0,0,0,0.10)",
+            boxShadow: "0 18px 45px -40px rgba(0,0,0,0.35)",
+            backdropFilter: "blur(18px)",
+          }}
+          aria-label="Search"
+          title="Search"
+        >
+          <Search className="w-5 h-5" style={{ color: "rgba(0,0,0,0.55)" }} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Navigation(props) {
   const tab = props.tab ?? props.currentTab ?? "library";
   const onTabChange = props.onTabChange ?? props.setTab;
   const onBack = props.onBack ?? null;
+
+  // ✅ NEW: action aligned with Back row (for session/project)
+  const belowHeaderRight = props.belowHeaderRight ?? null;
 
   const [open, setOpen] = useState(false);
   const panelRef = useRef(null);
@@ -131,7 +198,7 @@ export default function Navigation(props) {
   return (
     <>
       <TopBar onOpenMenu={() => setOpen(true)} />
-      <BackRow onBack={onBack} />
+      <BackRow onBack={onBack} rightSlot={belowHeaderRight} />
 
       {open ? (
         <div className="fixed inset-0 z-[80]">
@@ -188,7 +255,7 @@ export default function Navigation(props) {
         </div>
       ) : null}
 
-      
+      <MobilePillNav tab={tab} onTabChange={onTabChange} />
     </>
   );
 }
