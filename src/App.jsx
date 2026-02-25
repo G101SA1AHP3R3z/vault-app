@@ -101,25 +101,45 @@ function SessionDetailView({
 
   const dateText = formatDateMMDDYYYY(session?.createdAt);
 
-  // Editable notes w/ autosave (VaultContext handles timestamps safely)
+  // Notes autosave
   const [draft, setDraft] = useState((session?.notesText || "").toString());
   const lastSavedRef = useRef((session?.notesText || "").toString());
   const timerRef = useRef(null);
+
+  // Expand/collapse
+  const [expanded, setExpanded] = useState(false);
+
+  const taRef = useRef(null);
+  const autoGrow = () => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  };
 
   useEffect(() => {
     const next = (session?.notesText || "").toString();
     setDraft(next);
     lastSavedRef.current = next;
+    setExpanded(false);
   }, [session?.id, session?.notesText]);
 
   useEffect(() => {
     return () => timerRef.current && clearTimeout(timerRef.current);
   }, []);
 
+  useEffect(() => {
+    if (expanded) {
+      const t = setTimeout(autoGrow, 0);
+      return () => clearTimeout(t);
+    }
+  }, [expanded]);
+
   const scheduleSave = (next) => {
     setDraft(next);
     if (!onUpdateSessionNotes) return;
     if (timerRef.current) clearTimeout(timerRef.current);
+
     timerRef.current = setTimeout(async () => {
       try {
         if (next !== lastSavedRef.current) {
@@ -132,18 +152,44 @@ function SessionDetailView({
     }, 550);
   };
 
+  const flushSave = async () => {
+    try {
+      if (onUpdateSessionNotes && draft !== lastSavedRef.current) {
+        await onUpdateSessionNotes(draft);
+        lastSavedRef.current = draft;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const calcNoteCountForMedia = (m) => {
     const general = (mediaNotesById?.[m?.id]?.text || "").trim() ? 1 : 0;
     const hotspots = Array.isArray(m?.hotspots) ? m.hotspots.length : 0;
     return general + hotspots;
   };
 
+  const hasNotes = (draft || "").trim().length > 0;
+
   return (
-    <div className="pt-6 pb-28">
-      {/* session actions (kept minimal; we'll replace prompt() with a proper sheet next pass) */}
-      <div className="px-6 flex items-center justify-end">
+    <div className="pt-2 pb-28">
+      {/* Title row: title + kebab aligned */}
+      <div className="px-6 mt-2 flex items-start justify-between gap-3">
+        <div
+          style={{
+            fontFamily: fontSerif,
+            fontSize: 32,
+            lineHeight: 1.08,
+            letterSpacing: "-0.01em",
+            color: "rgba(0,0,0,0.88)",
+            fontWeight: 600,
+          }}
+        >
+          {session?.title?.trim() || "Untitled"}
+        </div>
+
         <button
-          className="w-10 h-10 rounded-[12px] inline-flex items-center justify-center active:scale-[0.98] transition-transform"
+          className="w-10 h-10 rounded-[12px] inline-flex items-center justify-center active:scale-[0.98] transition-transform shrink-0"
           style={{
             background: "rgba(255,255,255,0.78)",
             border: `1px solid ${line}`,
@@ -159,34 +205,19 @@ function SessionDetailView({
           }}
           aria-label="More"
           title="More"
+          type="button"
         >
           <MoreHorizontal className="w-4 h-4" />
         </button>
       </div>
 
-      {/* title */}
-      <div className="px-6 mt-6 flex items-start justify-between gap-3">
-        <div
-          style={{
-            fontFamily: fontSerif,
-            fontSize: 32,
-            lineHeight: 1.08,
-            letterSpacing: "-0.01em",
-            color: "rgba(0,0,0,0.88)",
-            fontWeight: 600,
-          }}
-        >
-          {session?.title?.trim() || "Untitled"}
-        </div>
-      </div>
-
-      {/* meta */}
+      {/* Meta */}
       <div className="px-6 mt-2 text-[12px]" style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}>
         {dateText ? `${dateText} · ` : ""}
         {count} {count === 1 ? "photo" : "photos"}
       </div>
 
-      {/* thumbnails */}
+      {/* Thumbnails */}
       <div className="px-6 mt-6">
         <div className="grid grid-cols-2 gap-3">
           {thumbs.map((m) => {
@@ -197,6 +228,7 @@ function SessionDetailView({
                 onClick={() => onOpenMedia?.(session.id, m.id)}
                 className="text-left"
                 style={{ WebkitTapHighlightColor: "transparent" }}
+                type="button"
               >
                 <div
                   className="overflow-hidden"
@@ -225,50 +257,111 @@ function SessionDetailView({
         </div>
       </div>
 
-      {/* session notes */}
+      {/* Session notes: preview + expand */}
       <div className="px-6 mt-8">
         <div
-          className="text-[11px] font-semibold tracking-[0.18em] uppercase"
+          className="text-[11px] font-semibold uppercase tracking-[0.18em]"
           style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}
         >
           SESSION NOTES
         </div>
 
-        <div
-          className="mt-3"
-          style={{
-            borderRadius: 14,
-            border: "1px solid rgba(0,0,0,0.06)",
-            background: "rgba(255,255,255,0.78)",
-          }}
-        >
-          <textarea
-            value={draft}
-            onChange={(e) => scheduleSave(e.target.value)}
-            onBlur={async () => {
-              try {
-                if (onUpdateSessionNotes && draft !== lastSavedRef.current) {
-                  await onUpdateSessionNotes(draft);
-                  lastSavedRef.current = draft;
-                }
-              } catch (e) {
-                console.error(e);
-              }
-            }}
-            rows={4}
-            placeholder="Optional — add session notes here."
-            className="w-full bg-transparent outline-none resize-none text-[13px]"
-            style={{
-              color: "rgba(0,0,0,0.78)",
-              padding: 14,
-              lineHeight: 1.55,
-              fontFamily: fontSans,
-            }}
-          />
-          <div className="px-4 pb-3 text-[11px]" style={{ color: "rgba(0,0,0,0.38)", fontFamily: fontSans }}>
-            Auto-saved.
+        {!expanded ? (
+          <div className="mt-3">
+            <div
+              className="text-[13px]"
+              style={{
+                color: hasNotes ? "rgba(0,0,0,0.78)" : "rgba(0,0,0,0.35)",
+                fontFamily: fontSans,
+                lineHeight: 1.6,
+                display: "-webkit-box",
+                WebkitLineClamp: 3,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {hasNotes ? draft : "Optional — add session notes."}
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setExpanded(true)}
+                className="h-9 px-3 rounded-[999px] inline-flex items-center active:scale-[0.99] transition-transform"
+                style={{
+                  background: "rgba(255,255,255,0.78)",
+                  border: "1px solid rgba(0,0,0,0.10)",
+                  color: "rgba(0,0,0,0.70)",
+                  fontFamily: fontSans,
+                  WebkitTapHighlightColor: "transparent",
+                }}
+              >
+                <span className="text-[12px] font-semibold uppercase" style={{ letterSpacing: "0.16em" }}>
+                  {hasNotes ? "Show more" : "Add notes"}
+                </span>
+              </button>
+
+              {hasNotes ? (
+                <div className="text-[11px]" style={{ color: "rgba(0,0,0,0.38)", fontFamily: fontSans }}>
+                  Auto-saved
+                </div>
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="mt-3">
+            <textarea
+              ref={taRef}
+              value={draft}
+              onChange={(e) => {
+                scheduleSave(e.target.value);
+                requestAnimationFrame(autoGrow);
+              }}
+              onBlur={flushSave}
+              placeholder="Optional — add session notes here."
+              className="w-full bg-transparent outline-none resize-none"
+              style={{
+                fontFamily: fontSans,
+                fontSize: 13,
+                lineHeight: 1.6,
+                fontWeight: 400,
+                letterSpacing: "0em",
+                color: hasNotes ? "rgba(0,0,0,0.78)" : "rgba(0,0,0,0.35)",
+                padding: 0,
+                border: "none",
+                borderRadius: 0,
+                minHeight: 120,
+              }}
+            />
+
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  await flushSave();
+                  setExpanded(false);
+                }}
+                className="h-9 px-3 rounded-[999px] inline-flex items-center active:scale-[0.99] transition-transform"
+                style={{
+                  background: "rgba(255,255,255,0.78)",
+                  border: "1px solid rgba(0,0,0,0.10)",
+                  color: "rgba(0,0,0,0.70)",
+                  fontFamily: fontSans,
+                  WebkitTapHighlightColor: "transparent",
+                }}
+              >
+                <span className="text-[12px] font-semibold uppercase" style={{ letterSpacing: "0.16em" }}>
+                  Show less
+                </span>
+              </button>
+
+              <div className="text-[11px]" style={{ color: "rgba(0,0,0,0.38)", fontFamily: fontSans }}>
+                Auto-saved
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
