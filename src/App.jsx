@@ -46,6 +46,10 @@ function AuthGate({ children }) {
   return children;
 }
 
+/**
+ * Very light cream + barely-there backdrop shapes.
+ * Grain should be handled globally via .index-grain (in your index.css).
+ */
 function AbstractCreamBackdrop({ children }) {
   return (
     <div className="min-h-screen relative index-grain" style={{ background: "#FFFEFA" }}>
@@ -76,15 +80,28 @@ function AbstractCreamBackdrop({ children }) {
   );
 }
 
-function SessionDetailView({ session, onOpenMedia, mediaNotesById, onUpdateSessionNotes }) {
-  const fontSans = "var(--font-sans)";
+function SessionDetailView({
+  session,
+  palette,
+  headerFont,
+  bodyFont,
+  mediaNotesById,
+  onOpenMedia,
+  onDeleteSession,
+  onShareSession,
+  onUpdateSessionNotes,
+}) {
+  const fontSerif = headerFont;
+  const fontSans = bodyFont;
 
+  const line = palette?.line || "rgba(0,0,0,0.10)";
   const media = Array.isArray(session?.media) ? session.media : [];
   const thumbs = media.filter((m) => m?.url);
+  const count = thumbs.length;
 
   const dateText = formatDateMMDDYYYY(session?.createdAt);
 
-  // ✅ editable + autosave
+  // Editable notes w/ autosave (VaultContext handles timestamps safely)
   const [draft, setDraft] = useState((session?.notesText || "").toString());
   const lastSavedRef = useRef((session?.notesText || "").toString());
   const timerRef = useRef(null);
@@ -95,10 +112,13 @@ function SessionDetailView({ session, onOpenMedia, mediaNotesById, onUpdateSessi
     lastSavedRef.current = next;
   }, [session?.id, session?.notesText]);
 
+  useEffect(() => {
+    return () => timerRef.current && clearTimeout(timerRef.current);
+  }, []);
+
   const scheduleSave = (next) => {
     setDraft(next);
     if (!onUpdateSessionNotes) return;
-
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
       try {
@@ -112,10 +132,6 @@ function SessionDetailView({ session, onOpenMedia, mediaNotesById, onUpdateSessi
     }, 550);
   };
 
-  useEffect(() => {
-    return () => timerRef.current && clearTimeout(timerRef.current);
-  }, []);
-
   const calcNoteCountForMedia = (m) => {
     const general = (mediaNotesById?.[m?.id]?.text || "").trim() ? 1 : 0;
     const hotspots = Array.isArray(m?.hotspots) ? m.hotspots.length : 0;
@@ -124,10 +140,35 @@ function SessionDetailView({ session, onOpenMedia, mediaNotesById, onUpdateSessi
 
   return (
     <div className="pt-6 pb-28">
-      <div className="px-6 mt-6">
+      {/* session actions (kept minimal; we'll replace prompt() with a proper sheet next pass) */}
+      <div className="px-6 flex items-center justify-end">
+        <button
+          className="w-10 h-10 rounded-[12px] inline-flex items-center justify-center active:scale-[0.98] transition-transform"
+          style={{
+            background: "rgba(255,255,255,0.78)",
+            border: `1px solid ${line}`,
+            color: "rgba(0,0,0,0.75)",
+            WebkitTapHighlightColor: "transparent",
+          }}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const action = window.prompt('Type: "share" or "delete"');
+            if (action === "share") onShareSession?.(session);
+            if (action === "delete") onDeleteSession?.(session);
+          }}
+          aria-label="More"
+          title="More"
+        >
+          <MoreHorizontal className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* title */}
+      <div className="px-6 mt-6 flex items-start justify-between gap-3">
         <div
           style={{
-            fontFamily: "var(--font-serif)",
+            fontFamily: fontSerif,
             fontSize: 32,
             lineHeight: 1.08,
             letterSpacing: "-0.01em",
@@ -137,56 +178,61 @@ function SessionDetailView({ session, onOpenMedia, mediaNotesById, onUpdateSessi
         >
           {session?.title?.trim() || "Untitled"}
         </div>
+      </div>
 
-        <div className="mt-2 text-[12px]" style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}>
-          {dateText ? `${dateText} · ` : ""}
-          {thumbs.length} {thumbs.length === 1 ? "photo" : "photos"}
+      {/* meta */}
+      <div className="px-6 mt-2 text-[12px]" style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}>
+        {dateText ? `${dateText} · ` : ""}
+        {count} {count === 1 ? "photo" : "photos"}
+      </div>
+
+      {/* thumbnails */}
+      <div className="px-6 mt-6">
+        <div className="grid grid-cols-2 gap-3">
+          {thumbs.map((m) => {
+            const notesCount = calcNoteCountForMedia(m);
+            return (
+              <button
+                key={m.id}
+                onClick={() => onOpenMedia?.(session.id, m.id)}
+                className="text-left"
+                style={{ WebkitTapHighlightColor: "transparent" }}
+              >
+                <div
+                  className="overflow-hidden"
+                  style={{
+                    borderRadius: 14,
+                    border: "1px solid rgba(0,0,0,0.08)",
+                    background: "rgba(0,0,0,0.06)",
+                    aspectRatio: "1 / 1",
+                  }}
+                >
+                  <img
+                    src={m.url}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                    draggable={false}
+                  />
+                </div>
+                <div className="mt-2 text-[11px]" style={{ color: "rgba(0,0,0,0.40)", fontFamily: fontSans }}>
+                  {notesCount} {notesCount === 1 ? "note" : "notes"}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {thumbs.length > 0 ? (
-        <div className="px-6 mt-6">
-          <div className="grid grid-cols-2 gap-3">
-            {thumbs.map((m) => {
-              const notesCount = calcNoteCountForMedia(m);
-              return (
-                <button
-                  key={m.id}
-                  onClick={() => onOpenMedia?.(session.id, m.id)}
-                  className="text-left"
-                  style={{ WebkitTapHighlightColor: "transparent" }}
-                >
-                  <div
-                    className="overflow-hidden"
-                    style={{
-                      borderRadius: 14,
-                      border: "1px solid rgba(0,0,0,0.08)",
-                      background: "rgba(0,0,0,0.06)",
-                      aspectRatio: "1 / 1",
-                    }}
-                  >
-                    <img
-                      src={m.url}
-                      alt=""
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                      decoding="async"
-                      draggable={false}
-                    />
-                  </div>
-                  <div className="mt-2 text-[11px]" style={{ color: "rgba(0,0,0,0.40)", fontFamily: fontSans }}>
-                    {notesCount} {notesCount === 1 ? "note" : "notes"}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
-
-      {/* ✅ Session notes now editable */}
+      {/* session notes */}
       <div className="px-6 mt-8">
-        <div className="label-caps">Session notes</div>
+        <div
+          className="text-[11px] font-semibold tracking-[0.18em] uppercase"
+          style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}
+        >
+          SESSION NOTES
+        </div>
 
         <div
           className="mt-3"
@@ -229,12 +275,20 @@ function SessionDetailView({ session, onOpenMedia, mediaNotesById, onUpdateSessi
 }
 
 function VaultShell() {
+  // Fonts (kept here for now; we’ll finish moving these into global CSS tokens next)
+  const bodyFont =
+    '"Raleway", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+  const headerFont = '"Literata", serif';
+
   const palette = useMemo(
     () => ({
       ink: "#0B0B0C",
       paper: "#FFFEFA",
       line: "rgba(0,0,0,0.08)",
-      danger: "rgba(255,77,46,0.92)",
+      sky: "#3AA8FF",
+      sun: "#FFEA3A",
+      breeze: "#54E6C1",
+      accent: "rgba(255,77,46,0.95)", // (we’ll make this “nearly invisible” + reserve for destructive actions next pass)
       pinEdge: "rgba(0,0,0,0.14)",
     }),
     []
@@ -255,6 +309,7 @@ function VaultShell() {
     upsertMediaNote,
 
     addProject,
+    updateProjectWeddingDate,
     renameProject,
     updateProjectBrief,
     archiveProject,
@@ -262,7 +317,7 @@ function VaultShell() {
 
     addSession,
     renameSession,
-    updateSessionNotes, // ✅ needed
+    updateSessionNotes,
     deleteSession,
 
     addMediaFilesToProject,
@@ -278,7 +333,24 @@ function VaultShell() {
 
   const [newOpen, setNewOpen] = useState(false);
   const [focusSessionId, setFocusSessionId] = useState(null);
+
+  // session detail routing
   const [activeSessionId, setActiveSessionId] = useState(null);
+
+  const searchInputRef = useRef(null);
+  useEffect(() => {
+    if (view === "dashboard" && tab === "search") {
+      const t = setTimeout(() => searchInputRef.current?.focus(), 120);
+      return () => clearTimeout(t);
+    }
+  }, [view, tab]);
+
+  const dashboardTitle = useMemo(() => {
+    if (tab === "graveyard") return "Archive";
+    if (tab === "vault") return "Settings";
+    if (tab === "search") return "Search";
+    return "Projects";
+  }, [tab]);
 
   const setTabAndEnsureDashboard = (t) => {
     setTab(t);
@@ -306,16 +378,20 @@ function VaultShell() {
     return (activeProject.sessions || []).find((s) => s?.id === activeSessionId) || null;
   }, [activeProject?.sessions, activeSessionId]);
 
-  const [recentsKeyHack] = useState(0); // noop to keep structure similar
-
-  // ---- Create project
-  const handleCreateProject = async ({ title, note }) => {
+  // --------- Create Project ----------
+  const handleCreateProject = async ({ title, note, weddingDate }) => {
     try {
-      const p = await addProject({ title: (title || "Untitled").trim(), note: (note || "").trim() });
+      const p = await addProject({
+        title: (title || "Untitled").trim(),
+        note: (note || "").trim(),
+        weddingDate: weddingDate || null,
+      });
+
       setNewOpen(false);
       setActiveProject(p);
       setView("project");
 
+      // create first session and focus it
       const s = await addSession(p.id, "");
       if (s?.id) setFocusSessionId(s.id);
     } catch (e) {
@@ -324,6 +400,7 @@ function VaultShell() {
     }
   };
 
+  // --------- Project actions ----------
   const editProject = async () => {
     const next = prompt("Project name:", activeProject?.title || "");
     if (!next) return;
@@ -359,6 +436,7 @@ function VaultShell() {
     }
   };
 
+  // --------- Sessions ----------
   const openAddSession = async () => {
     if (!activeProject?.id) return;
     try {
@@ -394,11 +472,13 @@ function VaultShell() {
     }
   };
 
+  // --------- Project Notes ----------
   const handleUpdateProjectBrief = async (text) => {
     if (!activeProject?.id) return;
     await updateProjectBrief?.(activeProject.id, text);
   };
 
+  // --------- Native photo picker -> upload ----------
   const handleAddMedia = async ({ files, sessionId, sessionTitle }) => {
     if (!activeProject) return;
     try {
@@ -426,6 +506,7 @@ function VaultShell() {
     });
   };
 
+  // --------- Viewer delete ----------
   const handleDeleteInViewer = async () => {
     const m = mediaNav.selectedMedia;
     if (!m?.id || !m?.sessionId) return;
@@ -445,7 +526,14 @@ function VaultShell() {
     return { ...m, generalNote: note };
   }, [mediaNav.selectedMedia, mediaNotesById]);
 
-  // Back target
+  // Navigation title/back (so the new Navigation.jsx can render consistent top bar)
+  const navTitle = useMemo(() => {
+    if (mediaNav.viewerOpen) return "Viewer";
+    if (view === "session") return "Session";
+    if (view === "project") return "Project";
+    return dashboardTitle;
+  }, [mediaNav.viewerOpen, view, dashboardTitle]);
+
   const navBack = useMemo(() => {
     if (mediaNav.viewerOpen) return mediaNav.closeViewer;
     if (view === "session") return closeSessionDetail;
@@ -453,51 +541,28 @@ function VaultShell() {
     return null;
   }, [mediaNav.viewerOpen, view]);
 
-  // ✅ Back-row right action: align "More" with Back
-  const belowHeaderRight = useMemo(() => {
-    if (view !== "session" || !activeSession) return null;
-
-    return (
-      <button
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const action = window.prompt('Type: "share" or "delete"');
-          if (action === "share") shareSession(activeSession);
-          if (action === "delete") removeSession(activeSession);
-        }}
-        className="w-10 h-10 rounded-[12px] inline-flex items-center justify-center active:scale-[0.98] transition-transform"
-        style={{
-          background: "rgba(255,255,255,0.72)",
-          border: "1px solid rgba(0,0,0,0.10)",
-          color: "rgba(0,0,0,0.72)",
-          WebkitTapHighlightColor: "transparent",
-        }}
-        aria-label="More"
-        title="More"
-      >
-        <MoreHorizontal className="w-4 h-4" />
-      </button>
-    );
-  }, [view, activeSession]);
-
   return (
     <AbstractCreamBackdrop>
-      <div style={{ fontFamily: "var(--font-sans)", color: palette.ink }}>
+      <div style={{ fontFamily: bodyFont, color: palette.ink }}>
         <div className="max-w-6xl mx-auto relative">
-          <Navigation tab={tab} onTabChange={setTabAndEnsureDashboard} onBack={navBack} belowHeaderRight={belowHeaderRight} />
+          {/* ✅ Unified nav API (new Navigation.jsx supports this cleanly) */}
+          <Navigation tab={tab} onTabChange={setTabAndEnsureDashboard} title={navTitle} onBack={navBack} />
 
           {/* DASHBOARD */}
           {view === "dashboard" && (
             <div className="pt-6 pb-28">
               {tab === "search" ? (
                 <div className="px-6">
+                  {/* Search input */}
                   <div
                     className="w-full px-4 py-3 rounded-[14px]"
                     style={{ background: "rgba(255,255,255,0.70)", border: `1px solid ${palette.line}` }}
                   >
-                    <div className="label-caps">Search</div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: "rgba(0,0,0,0.45)" }}>
+                      Search
+                    </div>
                     <input
+                      ref={searchInputRef}
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       placeholder="Search projects or tags…"
@@ -510,28 +575,32 @@ function VaultShell() {
                   </div>
 
                   <div className="mt-6">
-                    <div className="label-caps">Results</div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: "rgba(0,0,0,0.45)" }}>
+                      Results
+                    </div>
                     <div className="mt-3">
                       <LibraryGrid title="" onNew={null} />
                     </div>
                   </div>
                 </div>
               ) : tab === "vault" ? (
-                <Settings />
+                <Settings headerFont={headerFont} palette={palette} />
               ) : (
-                <LibraryGrid title="Projects" onNew={() => setNewOpen(true)} />
+                <LibraryGrid title={dashboardTitle} onNew={() => setNewOpen(true)} />
               )}
             </div>
           )}
 
-          {/* PROJECT */}
+          {/* PROJECT PAGE */}
           {view === "project" && activeProject && (
             <ProjectView
               project={activeProject}
               palette={palette}
+              onBack={goBackFromProject}
               onEditProject={editProject}
               onShareProject={shareProject}
               onArchiveProject={removeProject}
+              onUpdateWeddingDate={(d) => updateProjectWeddingDate?.(activeProject.id, d)}
               onOpenViewer={mediaNav.openViewer}
               onOpenSession={openSessionDetail}
               onAddSession={openAddSession}
@@ -545,22 +614,28 @@ function VaultShell() {
             />
           )}
 
-          {/* SESSION */}
+          {/* SESSION DETAIL */}
           {view === "session" && activeProject && activeSession && (
             <SessionDetailView
               session={activeSession}
+              palette={palette}
+              headerFont={headerFont}
+              bodyFont={bodyFont}
               mediaNotesById={mediaNotesById}
               onOpenMedia={mediaNav.openViewer}
-              onUpdateSessionNotes={(text) => updateSessionNotes(activeProject.id, activeSession.id, text)}
+              onDeleteSession={removeSession}
+              onShareSession={shareSession}
+              onUpdateSessionNotes={(text) => updateSessionNotes?.(activeProject.id, activeSession.id, text)}
             />
           )}
 
-          {/* VIEWER */}
+          {/* Viewer overlay */}
           {mediaNav.viewerOpen && activeProject && mediaWithNote && (
             <MediaViewer
               mode="modal"
               project={activeProject}
               media={mediaWithNote}
+              headerFont={headerFont}
               palette={palette}
               mediaIndex={Math.max(0, mediaNav.selectedIndex)}
               mediaCount={mediaNav.flatMedia.length}
@@ -578,6 +653,7 @@ function VaultShell() {
             />
           )}
 
+          {/* New Project Screen */}
           <NewProjectModal open={newOpen} onClose={() => setNewOpen(false)} onCreate={handleCreateProject} />
         </div>
       </div>

@@ -42,6 +42,7 @@ function KebabMenu({ items = [], icon = MoreHorizontal, align = "right" }) {
   return (
     <div ref={wrapRef} className="relative">
       <button
+        type="button"
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -74,6 +75,7 @@ function KebabMenu({ items = [], icon = MoreHorizontal, align = "right" }) {
           {items.map((it, idx) => (
             <button
               key={idx}
+              type="button"
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -119,6 +121,7 @@ function ThumbStrip({ thumbs, onOpen }) {
         {thumbs.map((m) => (
           <button
             key={m.id}
+            type="button"
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -151,12 +154,36 @@ function ThumbStrip({ thumbs, onOpen }) {
   );
 }
 
+/** Accessible clickable wrapper that can contain real buttons */
+function ClickCard({ onOpen, children }) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen?.()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen?.();
+        }
+      }}
+      className="w-full text-left outline-none"
+      style={{ WebkitTapHighlightColor: "transparent" }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export default function ProjectView({
   project,
 
   onEditProject,
   onShareProject,
   onArchiveProject,
+
+  // NEW: wedding date
+  onUpdateWeddingDate, // (dateStrOrNull) => Promise<void>
 
   // viewer
   onOpenViewer,
@@ -188,7 +215,7 @@ export default function ProjectView({
     return s.slice().sort((a, b) => (b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0));
   }, [project?.sessions]);
 
-  // Optional "date" field (kept for compatibility)
+  // Wedding date display
   const dateText =
     formatDateMMDDYYYY(project?.weddingDate) ||
     (typeof project?.weddingDate === "string" ? project.weddingDate : "");
@@ -304,8 +331,39 @@ export default function ProjectView({
     }
   };
 
+  // Wedding date modal
+  const [dateOpen, setDateOpen] = useState(false);
+  const [dateDraft, setDateDraft] = useState("");
+
+  useEffect(() => {
+    const d = typeof project?.weddingDate === "string" ? project.weddingDate : "";
+    setDateDraft(d || "");
+  }, [project?.id]);
+
+  const saveWeddingDate = async () => {
+    try {
+      await onUpdateWeddingDate?.(dateDraft ? dateDraft : null);
+      setDateOpen(false);
+    } catch (e) {
+      console.error(e);
+      alert(e?.message || "Could not save wedding date.");
+    }
+  };
+
+  const clearWeddingDate = async () => {
+    try {
+      await onUpdateWeddingDate?.(null);
+      setDateDraft("");
+      setDateOpen(false);
+    } catch (e) {
+      console.error(e);
+      alert(e?.message || "Could not clear wedding date.");
+    }
+  };
+
   const projectMenuItems = [
     onEditProject ? { label: "Edit project", icon: Pencil, onClick: onEditProject } : null,
+    onUpdateWeddingDate ? { label: "Edit wedding date", icon: Pencil, onClick: () => setDateOpen(true) } : null,
     onShareProject ? { label: "Share", icon: Share2, onClick: onShareProject } : null,
     onArchiveProject ? { label: "Archive", icon: Trash2, danger: true, onClick: onArchiveProject } : null,
   ].filter(Boolean);
@@ -323,8 +381,8 @@ export default function ProjectView({
         onChange={onPickedFiles}
       />
 
-      {/* Header block (Nav/top-bar handled globally by Navigation.jsx) */}
       <div className="px-6">
+        {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <LabelCaps className="mt-1">Project</LabelCaps>
@@ -389,6 +447,7 @@ export default function ProjectView({
             <LabelCaps>Sessions</LabelCaps>
 
             <button
+              type="button"
               onClick={onAddSession}
               className="h-9 px-3 rounded-[999px] inline-flex items-center gap-2 active:scale-[0.99] transition-transform"
               style={{
@@ -436,12 +495,7 @@ export default function ProjectView({
                       background: "rgba(255,255,255,0.78)",
                     }}
                   >
-                    {/* Card is clickable -> Session detail */}
-                    <button
-                      onClick={() => onOpenSession?.(session)}
-                      className="w-full text-left"
-                      style={{ WebkitTapHighlightColor: "transparent" }}
-                    >
+                    <ClickCard onOpen={() => onOpenSession?.(session)}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <input
@@ -483,10 +537,7 @@ export default function ProjectView({
                         ) : null}
                       </div>
 
-                      <ThumbStrip
-                        thumbs={thumbs}
-                        onOpen={(m) => onOpenViewer?.(session.id, m.id)}
-                      />
+                      <ThumbStrip thumbs={thumbs} onOpen={(m) => onOpenViewer?.(session.id, m.id)} />
 
                       <div
                         className="mt-4 flex items-center justify-between"
@@ -494,6 +545,7 @@ export default function ProjectView({
                         onPointerDown={(e) => e.stopPropagation()}
                       >
                         <button
+                          type="button"
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -518,7 +570,7 @@ export default function ProjectView({
                           Tap card to open
                         </div>
                       </div>
-                    </button>
+                    </ClickCard>
                   </div>
                 );
               })
@@ -530,9 +582,94 @@ export default function ProjectView({
           </div>
         </div>
 
-        {/* Bottom breathing room */}
         <div className="h-10" />
       </div>
+
+      {/* Wedding date modal */}
+      {dateOpen && (
+        <div
+          className="fixed inset-0 z-[200] flex items-end md:items-center justify-center"
+          onClick={() => setDateOpen(false)}
+          style={{ background: "rgba(0,0,0,0.20)", backdropFilter: "blur(8px)" }}
+        >
+          <div
+            className="w-full md:max-w-md mx-auto"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "rgba(255,255,255,0.96)",
+              border: "1px solid rgba(0,0,0,0.08)",
+              borderRadius: 18,
+              boxShadow: "0 30px 80px -60px rgba(0,0,0,0.55)",
+              padding: 16,
+              margin: 16,
+            }}
+          >
+            <div className="label-caps">Wedding date</div>
+
+            <input
+              type="date"
+              value={dateDraft}
+              onChange={(e) => setDateDraft(e.target.value)}
+              className="mt-3 w-full h-11 px-3 rounded-[12px] outline-none"
+              style={{
+                background: "rgba(0,0,0,0.03)",
+                border: "1px solid rgba(0,0,0,0.10)",
+                fontFamily: "var(--font-sans)",
+                color: "rgba(0,0,0,0.80)",
+              }}
+            />
+
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={clearWeddingDate}
+                className="h-10 px-3 rounded-[12px] font-semibold uppercase"
+                style={{
+                  letterSpacing: "0.16em",
+                  background: "rgba(255,255,255,0.86)",
+                  border: "1px solid rgba(0,0,0,0.10)",
+                  color: "rgba(0,0,0,0.55)",
+                  fontSize: 12,
+                }}
+              >
+                Clear
+              </button>
+
+              <div className="flex-1" />
+
+              <button
+                type="button"
+                onClick={() => setDateOpen(false)}
+                className="h-10 px-3 rounded-[12px] font-semibold uppercase"
+                style={{
+                  letterSpacing: "0.16em",
+                  background: "rgba(255,255,255,0.86)",
+                  border: "1px solid rgba(0,0,0,0.10)",
+                  color: "rgba(0,0,0,0.72)",
+                  fontSize: 12,
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={saveWeddingDate}
+                className="h-10 px-3 rounded-[12px] font-semibold uppercase"
+                style={{
+                  letterSpacing: "0.16em",
+                  background: "rgba(0,0,0,0.06)",
+                  border: "1px solid rgba(0,0,0,0.12)",
+                  color: "rgba(0,0,0,0.82)",
+                  fontSize: 12,
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   doc,
   addDoc,
   updateDoc,
+  deleteDoc,
   onSnapshot,
   serverTimestamp,
   query,
@@ -179,15 +180,21 @@ export function VaultProvider({ children }) {
   // -----------------------------
   // Projects
   // -----------------------------
-  const addProject = async ({ title, aiTags = [], note = "" }) => {
+  const addProject = async ({ title, aiTags = [], note = "", weddingDate = null }) => {
     if (!user?.uid) return null;
 
-    const newProject = {
+    const cleanNote = (note || "").toString().trim();
+    const cleanWeddingDate = weddingDate ? String(weddingDate) : null; // "YYYY-MM-DD" or null
+    const createdAtLocal = nowSeconds();
+
+    // Firestore receives serverTimestamp() values, but the local object we
+    // return should be immediately renderable/sortable.
+    const payload = {
       title: title || "Untitled Project",
       aiTags: safeArray(aiTags),
 
       // legacy
-      overallAudio: note,
+      overallAudio: cleanNote,
 
       status: "active",
       createdAt: serverTimestamp(),
@@ -200,13 +207,23 @@ export function VaultProvider({ children }) {
       expiresIn: "30 Days",
       coverPhoto: "",
 
+      // optional
+      weddingDate: cleanWeddingDate,
+
       // brief
-      briefText: "",
-      briefUpdatedAt: null,
+      briefText: cleanNote,
+      briefUpdatedAt: serverTimestamp(),
     };
 
-    const docRef = await addDoc(collection(db, "projects"), newProject);
-    return { id: docRef.id, ...newProject };
+    const docRef = await addDoc(collection(db, "projects"), payload);
+
+    return {
+      id: docRef.id,
+      ...payload,
+      // local-friendly timestamps
+      createdAt: createdAtLocal,
+      briefUpdatedAt: createdAtLocal,
+    };
   };
 
   const renameProject = async (projectId, nextTitle) => {
@@ -234,6 +251,19 @@ export function VaultProvider({ children }) {
 
     await updateDoc(doc(db, "projects", projectId), patch);
     applyProjectPatchLocal(projectId, { ...patch, briefUpdatedAt: nowSeconds() });
+  };
+
+  // -----------------------------
+  // Wedding date
+  // -----------------------------
+  const updateProjectWeddingDate = async (projectId, weddingDate) => {
+    if (!user?.uid || !projectId) return;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+
+    const next = weddingDate ? String(weddingDate) : null; // "YYYY-MM-DD" or null
+    await updateDoc(doc(db, "projects", projectId), { weddingDate: next });
+    applyProjectPatchLocal(projectId, { weddingDate: next });
   };
 
   const archiveProject = async (projectId) => {
@@ -374,54 +404,49 @@ export function VaultProvider({ children }) {
     });
   };
 
-// VaultContext.jsx — replace updateSessionNotes with this
-const updateSessionNotes = async (projectId, sessionId, notesText) => {
-  if (!user?.uid || !projectId || !sessionId) return;
+  const updateSessionNotes = async (projectId, sessionId, notesText) => {
+    if (!user?.uid || !projectId || !sessionId) return;
+    const proj = projects.find((p) => p.id === projectId) || activeProject;
+    if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
 
-  const proj = projects.find((p) => p.id === projectId) || activeProject;
-  if (proj && !canEdit(user.uid, proj)) throw new Error("You don’t have edit access to this project.");
+    const text = (notesText || "").toString();
 
-  const text = (notesText || "").toString();
+    const projectRef = doc(db, "projects", projectId);
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists()) throw new Error("Project not found.");
+      const data = snap.data();
+      const sessions = safeArray(data.sessions).map((s) => ({ ...s }));
+      const idx = sessions.findIndex((s) => s?.id === sessionId);
+      if (idx < 0) throw new Error("Session not found.");
 
-  const projectRef = doc(db, "projects", projectId);
-  await runTransaction(db, async (tx) => {
-    const snap = await tx.get(projectRef);
-    if (!snap.exists()) throw new Error("Project not found.");
-    const data = snap.data();
+      sessions[idx].notesText = text;
+      // Firestore does not support serverTimestamp() inside arrays.
+      sessions[idx].notesUpdatedAt = nowSeconds();
 
-    const sessions = safeArray(data.sessions).map((s) => ({ ...s }));
-    const idx = sessions.findIndex((s) => s?.id === sessionId);
-    if (idx < 0) throw new Error("Session not found.");
-
-    sessions[idx].notesText = text;
-
-    // ✅ IMPORTANT: use a normal timestamp object, NOT serverTimestamp()
-    sessions[idx].notesUpdatedAt = nowSeconds();
-
-    tx.update(projectRef, { sessions });
-  });
-
-  // local patch (best-effort)
-  setProjects((prev) =>
-    prev.map((p) => {
-      if (p.id !== projectId) return p;
-      const sessions = safeArray(p.sessions).map((s) =>
-        s?.id === sessionId ? { ...s, notesText: text, notesUpdatedAt: nowSeconds() } : s
-      );
-      return { ...p, sessions };
-    })
-  );
-
-  if (activeProject?.id === projectId) {
-    setActiveProject((p) => {
-      if (!p) return p;
-      const sessions = safeArray(p.sessions).map((s) =>
-        s?.id === sessionId ? { ...s, notesText: text, notesUpdatedAt: nowSeconds() } : s
-      );
-      return { ...p, sessions };
+      tx.update(projectRef, { sessions });
     });
-  }
-};
+
+    // local patch (best-effort)
+    setProjects((prev) =>
+      prev.map((p) => {
+        if (p.id !== projectId) return p;
+        const sessions = safeArray(p.sessions).map((s) =>
+          s?.id === sessionId ? { ...s, notesText: text, notesUpdatedAt: nowSeconds() } : s
+        );
+        return { ...p, sessions };
+      })
+    );
+    if (activeProject?.id === projectId) {
+      setActiveProject((p) => {
+        if (!p) return p;
+        const sessions = safeArray(p.sessions).map((s) =>
+          s?.id === sessionId ? { ...s, notesText: text, notesUpdatedAt: nowSeconds() } : s
+        );
+        return { ...p, sessions };
+      });
+    }
+  };
 
   const deleteSession = async (projectId, sessionId) => {
     if (!user?.uid || !projectId || !sessionId) return;
@@ -714,7 +739,8 @@ const updateSessionNotes = async (projectId, sessionId, notesText) => {
       // best effort delete old file path reference later (not here)
       sessions[idx].voiceNoteUrl = url;
       sessions[idx].voiceNotePath = path;
-      sessions[idx].voiceNoteCreatedAt = serverTimestamp();
+      // Firestore does not support serverTimestamp() inside arrays.
+      sessions[idx].voiceNoteCreatedAt = nowSeconds();
       sessions[idx].voiceNoteDurationSec = typeof durationSec === "number" ? durationSec : null;
 
       // reset transcript status (server can fill later)
@@ -743,7 +769,8 @@ const updateSessionNotes = async (projectId, sessionId, notesText) => {
       sessions[idx].voiceTranscriptRaw = (raw || "").toString();
       sessions[idx].voiceTranscriptEdited = (edited || "").toString();
       sessions[idx].voiceTranscriptStatus = status || "ready";
-      sessions[idx].voiceTranscriptUpdatedAt = serverTimestamp();
+      // Firestore does not support serverTimestamp() inside arrays.
+      sessions[idx].voiceTranscriptUpdatedAt = nowSeconds();
 
       tx.update(projectRef, { sessions });
     });
@@ -845,6 +872,7 @@ const updateSessionNotes = async (projectId, sessionId, notesText) => {
     addProject,
     renameProject,
     updateProjectBrief,
+    updateProjectWeddingDate,
     deleteProject,
     archiveProject,
     restoreProject,
