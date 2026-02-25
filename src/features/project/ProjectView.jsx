@@ -1,6 +1,5 @@
-// /src/features/project/ProjectView.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { MoreHorizontal, Pencil, Share2, Trash2, Plus, ImagePlus } from "lucide-react";
+import { MoreHorizontal, Share2, Trash2 } from "lucide-react";
 
 function formatDateMMDDYYYY(ts) {
   try {
@@ -21,14 +20,20 @@ function formatDateMMDDYYYY(ts) {
   return "";
 }
 
-function LabelCaps({ children, className = "" }) {
-  return <div className={`label-caps ${className}`}>{children}</div>;
+function Label({ children, font }) {
+  return (
+    <div
+      className="text-[11px] font-semibold tracking-[0.18em] uppercase"
+      style={{ color: "rgba(0,0,0,0.45)", fontFamily: font }}
+    >
+      {children}
+    </div>
+  );
 }
 
-function KebabMenu({ items = [], icon = MoreHorizontal, align = "right" }) {
+function KebabMenu({ items = [], palette, icon = MoreHorizontal, buttonStyle = "kebab" }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
-  const Icon = icon;
 
   useEffect(() => {
     const onDown = (e) => {
@@ -39,20 +44,26 @@ function KebabMenu({ items = [], icon = MoreHorizontal, align = "right" }) {
     return () => window.removeEventListener("pointerdown", onDown);
   }, []);
 
+  const line = palette?.line || "rgba(0,0,0,0.10)";
+  const Icon = icon;
+
   return (
     <div ref={wrapRef} className="relative">
       <button
-        type="button"
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
           setOpen((v) => !v);
         }}
-        className="w-9 h-9 rounded-[12px] inline-flex items-center justify-center active:scale-[0.98] transition-transform"
+        className={
+          buttonStyle === "hamburger"
+            ? "w-10 h-10 rounded-full inline-flex items-center justify-center"
+            : "w-9 h-9 rounded-full inline-flex items-center justify-center"
+        }
         style={{
-          background: "rgba(255,255,255,0.72)",
-          border: "1px solid var(--line)",
-          color: "rgba(0,0,0,0.72)",
+          background: "rgba(255,255,255,0.92)",
+          border: `1px solid ${line}`,
+          color: "rgba(0,0,0,0.75)",
           WebkitTapHighlightColor: "transparent",
         }}
         aria-label="More"
@@ -63,32 +74,25 @@ function KebabMenu({ items = [], icon = MoreHorizontal, align = "right" }) {
 
       {open && (
         <div
-          className={`absolute ${align === "left" ? "left-0" : "right-0"} mt-2 w-56 overflow-hidden z-50`}
+          className="absolute right-0 mt-2 w-56 overflow-hidden z-50"
           style={{
-            borderRadius: 12,
-            background: "rgba(255,255,255,0.94)",
-            border: "1px solid var(--hairline)",
+            borderRadius: 10,
+            background: "rgba(255,255,255,0.97)",
+            border: `1px solid ${line}`,
             boxShadow: "0 18px 45px -38px rgba(0,0,0,0.45)",
-            backdropFilter: "blur(18px)",
           }}
         >
           {items.map((it, idx) => (
             <button
               key={idx}
-              type="button"
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 setOpen(false);
                 it?.onClick?.();
               }}
-              className="w-full px-4 py-3 flex items-center gap-3 text-[13px] font-semibold text-left"
-              style={{
-                color: it?.danger ? "rgba(255,77,46,0.95)" : "rgba(0,0,0,0.82)",
-                background: "transparent",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(0,0,0,0.04)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              className="w-full px-4 py-3 flex items-center gap-3 text-sm font-semibold text-left hover:bg-black/5"
+              style={{ color: it?.danger ? "#DC2626" : "rgba(0,0,0,0.82)" }}
             >
               {it?.icon ? <it.icon className="w-4 h-4" /> : null}
               {it?.label}
@@ -100,129 +104,51 @@ function KebabMenu({ items = [], icon = MoreHorizontal, align = "right" }) {
   );
 }
 
-function ThumbStrip({ thumbs, onOpen }) {
-  if (!thumbs?.length) return null;
-
-  return (
-    <div
-      className="mt-4 overflow-x-auto pb-1"
-      style={{
-        scrollbarWidth: "none",
-        WebkitOverflowScrolling: "touch",
-      }}
-    >
-      <style>{`.index-hide-scroll::-webkit-scrollbar{ display:none; }`}</style>
-
-      <div className="flex gap-2 index-hide-scroll">
-        {thumbs.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onOpen?.(m);
-            }}
-            className="shrink-0 overflow-hidden active:scale-[0.99] transition-transform"
-            style={{
-              width: 74,
-              height: 74,
-              borderRadius: 12,
-              border: "1px solid var(--hairline)",
-              background: "rgba(0,0,0,0.04)",
-              WebkitTapHighlightColor: "transparent",
-            }}
-            aria-label="Open media"
-            title="Open"
-          >
-            <img
-              src={m.url}
-              alt=""
-              className="w-full h-full object-cover"
-              loading="lazy"
-              decoding="async"
-              draggable={false}
-            />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Clickable card that is *reliable*:
- * - If you click on interactive elements (button/input/link/etc), it does NOT open the session.
- * - If you click on any other area inside the card, it opens.
- */
-function ClickCard({ onOpen, children }) {
-  const shouldIgnore = (target) => {
-    if (!target || typeof target.closest !== "function") return false;
-    return !!target.closest("button,a,input,textarea,select,summary,[data-noopen]");
-  };
-
-  const handleOpen = (e) => {
-    // If any child called preventDefault (or it's interactive), do nothing
-    if (e.defaultPrevented) return;
-    if (shouldIgnore(e.target)) return;
-    onOpen?.();
-  };
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={handleOpen}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen?.();
-        }
-      }}
-      className="w-full text-left outline-none"
-      style={{
-        WebkitTapHighlightColor: "transparent",
-        cursor: "pointer",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
 export default function ProjectView({
   project,
+  palette,
 
+  onBack,
   onEditProject,
   onShareProject,
   onArchiveProject,
 
-  onUpdateWeddingDate,
-
+  // viewer
   onOpenViewer,
-  onOpenSession,
 
+  // session detail
+  onOpenSession, // (session) => void
+
+  // sessions
   onAddSession,
   onRenameSession,
   onDeleteSession,
   onShareSession,
 
+  // notes
   onUpdateProjectBrief,
+
+  // native picker upload
   onAddPhotosNative,
 
+  // focus newly-created session title input
   autoFocusSessionId,
   onClearAutoFocusSessionId,
 }) {
   if (!project) return null;
 
+  const fontSerif = "Literata, serif";
+  const fontSans = "Raleway, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  const line = palette?.line || "rgba(0,0,0,0.10)";
+
+  // Sessions newest first
   const sessions = useMemo(() => {
     const s = Array.isArray(project?.sessions) ? project.sessions : [];
     return s.slice().sort((a, b) => (b?.createdAt?.seconds || 0) - (a?.createdAt?.seconds || 0));
   }, [project?.sessions]);
 
-  const dateText =
-    formatDateMMDDYYYY(project?.weddingDate) ||
-    (typeof project?.weddingDate === "string" ? project.weddingDate : "");
+  const weddingDateText =
+    formatDateMMDDYYYY(project?.weddingDate) || (typeof project?.weddingDate === "string" ? project.weddingDate : "");
 
   // Notes autosave
   const [notesDraft, setNotesDraft] = useState("");
@@ -264,7 +190,7 @@ export default function ProjectView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notesDraft]);
 
-  // Inline session title drafts
+  // Inline rename drafts
   const [titleDrafts, setTitleDrafts] = useState({});
   useEffect(() => {
     setTitleDrafts((prev) => {
@@ -275,26 +201,6 @@ export default function ProjectView({
       return next;
     });
   }, [sessions]);
-
-  const commitSessionTitle = async (session) => {
-    const nextTitle = (titleDrafts?.[session.id] ?? "").trim();
-    const fallback = "Untitled";
-    const finalTitle = nextTitle || fallback;
-
-    const currentTitleNorm = (session.title || "").trim() || fallback;
-    if (currentTitleNorm === finalTitle) {
-      setTitleDrafts((p) => ({ ...p, [session.id]: finalTitle }));
-      return;
-    }
-
-    try {
-      await onRenameSession?.(session.id, finalTitle);
-    } catch (e) {
-      console.error(e);
-      alert(e?.message || "Could not rename session.");
-      setTitleDrafts((p) => ({ ...p, [session.id]: session.title || "" }));
-    }
-  };
 
   // Focus newly created session title
   const sessionInputRefs = useRef({});
@@ -335,45 +241,31 @@ export default function ProjectView({
     }
   };
 
-  // Wedding date modal
-  const [dateOpen, setDateOpen] = useState(false);
-  const [dateDraft, setDateDraft] = useState("");
+  const commitSessionTitle = async (session) => {
+    const nextTitle = (titleDrafts?.[session.id] ?? "").trim();
+    const fallback = "Untitled";
+    const finalTitle = nextTitle || fallback;
 
-  useEffect(() => {
-    const d = typeof project?.weddingDate === "string" ? project.weddingDate : "";
-    setDateDraft(d || "");
-  }, [project?.id]);
+    const currentTitleNorm = (session.title || "").trim() || fallback;
+    const nextTitleNorm = finalTitle;
 
-  const saveWeddingDate = async () => {
+    if (currentTitleNorm === nextTitleNorm) {
+      setTitleDrafts((p) => ({ ...p, [session.id]: finalTitle }));
+      return;
+    }
+
     try {
-      await onUpdateWeddingDate?.(dateDraft ? dateDraft : null);
-      setDateOpen(false);
+      await onRenameSession?.(session.id, finalTitle);
     } catch (e) {
       console.error(e);
-      alert(e?.message || "Could not save wedding date.");
+      alert(e?.message || "Could not rename session.");
+      setTitleDrafts((p) => ({ ...p, [session.id]: session.title || "" }));
     }
   };
-
-  const clearWeddingDate = async () => {
-    try {
-      await onUpdateWeddingDate?.(null);
-      setDateDraft("");
-      setDateOpen(false);
-    } catch (e) {
-      console.error(e);
-      alert(e?.message || "Could not clear wedding date.");
-    }
-  };
-
-  const projectMenuItems = [
-    onEditProject ? { label: "Edit project", icon: Pencil, onClick: onEditProject } : null,
-    onUpdateWeddingDate ? { label: "Edit wedding date", icon: Pencil, onClick: () => setDateOpen(true) } : null,
-    onShareProject ? { label: "Share", icon: Share2, onClick: onShareProject } : null,
-    onArchiveProject ? { label: "Archive", icon: Trash2, danger: true, onClick: onArchiveProject } : null,
-  ].filter(Boolean);
 
   return (
     <div className="pt-6 pb-28">
+      {/* hidden native picker */}
       <input
         ref={fileInputRef}
         type="file"
@@ -384,285 +276,237 @@ export default function ProjectView({
         onChange={onPickedFiles}
       />
 
-      <div className="px-6">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <LabelCaps className="mt-1">Project</LabelCaps>
-
-            <div
-              className="mt-2 truncate"
-              style={{
-                fontFamily: "var(--font-serif)",
-                fontSize: 36,
-                lineHeight: 1.08,
-                letterSpacing: "-0.01em",
-                color: "var(--ink)",
-                fontWeight: 600,
-              }}
-              title={project?.title || "Untitled"}
-            >
-              {project?.title || "Untitled"}
-            </div>
-
-            {dateText ? (
-              <div className="mt-2 text-[12px]" style={{ color: "var(--muted)" }}>
-                {dateText}
-              </div>
-            ) : null}
-          </div>
-
-          {projectMenuItems.length ? <KebabMenu items={projectMenuItems} /> : null}
+      {/* Title */}
+      <div className="px-6 mt-2">
+        <div
+          className="uppercase"
+          style={{
+            fontFamily: fontSerif,
+            fontSize: 38,
+            lineHeight: 1.05,
+            letterSpacing: "0.06em",
+            color: "rgba(0,0,0,0.88)",
+            fontWeight: 500,
+          }}
+        >
+          {project.title || "Untitled"}
         </div>
-
-        {/* Notes */}
-        <div className="mt-8">
-          <LabelCaps>Notes</LabelCaps>
-          <div
-            className="mt-3"
-            style={{
-              borderRadius: 14,
-              border: "1px solid var(--hairline)",
-              background: "rgba(255,255,255,0.78)",
-            }}
-          >
-            <textarea
-              value={notesDraft}
-              onChange={(e) => setNotesDraft(e.target.value)}
-              onBlur={() => saveNotes(notesDraft)}
-              className="w-full bg-transparent outline-none text-[13px]"
-              rows={4}
-              placeholder="Add a note."
-              style={{
-                color: "rgba(0,0,0,0.78)",
-                padding: 14,
-                resize: "none",
-                fontFamily: "var(--font-sans)",
-                lineHeight: 1.55,
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Sessions */}
-        <div className="mt-10">
-          <div className="flex items-center justify-between">
-            <LabelCaps>Sessions</LabelCaps>
-
-            <button
-              type="button"
-              onClick={onAddSession}
-              className="h-9 px-3 rounded-[999px] inline-flex items-center gap-2 active:scale-[0.99] transition-transform"
-              style={{
-                background: "rgba(255,255,255,0.76)",
-                border: "1px solid var(--line)",
-                color: "rgba(0,0,0,0.68)",
-                fontFamily: "var(--font-sans)",
-                WebkitTapHighlightColor: "transparent",
-              }}
-              aria-label="Add session"
-              title="Add session"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="text-[12px] font-semibold uppercase" style={{ letterSpacing: "0.16em" }}>
-                Add
-              </span>
-            </button>
-          </div>
-
-          <div className="mt-4 space-y-4">
-            {sessions.length ? (
-              sessions.map((session) => {
-                const media = Array.isArray(session?.media) ? session.media : [];
-                const thumbs = media.filter((m) => m?.url).slice(0, 18);
-                const count = thumbs.length;
-                const sDate = formatDateMMDDYYYY(session?.createdAt);
-
-                const sessionMenuItems = [
-                  onShareSession ? { label: "Share", icon: Share2, onClick: () => onShareSession?.(session) } : null,
-                  onDeleteSession
-                    ? { label: "Delete session", icon: Trash2, danger: true, onClick: () => onDeleteSession?.(session) }
-                    : null,
-                ].filter(Boolean);
-
-                const draft = titleDrafts?.[session.id] ?? (session.title || "");
-                const displayDraft = (draft || "").toString();
-
-                return (
-                  <div
-                    key={session.id}
-                    className="p-4"
-                    style={{
-                      borderRadius: 14,
-                      border: "1px solid var(--hairline)",
-                      background: "rgba(255,255,255,0.78)",
-                    }}
-                  >
-                    <ClickCard onOpen={() => onOpenSession?.(session)}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <input
-                            ref={(el) => {
-                              if (el) sessionInputRefs.current[session.id] = el;
-                            }}
-                            value={displayDraft}
-                            onChange={(e) => setTitleDrafts((p) => ({ ...p, [session.id]: e.target.value }))}
-                            onBlur={() => commitSessionTitle(session)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                e.currentTarget.blur();
-                              }
-                            }}
-                            placeholder="Untitled"
-                            className="w-full bg-transparent outline-none"
-                            style={{
-                              fontFamily: "var(--font-serif)",
-                              color: "rgba(0,0,0,0.86)",
-                              fontWeight: 600,
-                              letterSpacing: "-0.005em",
-                              fontSize: 20,
-                            }}
-                          />
-
-                          <div className="mt-1 text-[12px]" style={{ color: "var(--muted)", fontFamily: "var(--font-sans)" }}>
-                            {sDate ? `${sDate} · ` : ""}
-                            {count} {count === 1 ? "photo" : "photos"}
-                          </div>
-                        </div>
-
-                        {sessionMenuItems.length ? <KebabMenu items={sessionMenuItems} /> : null}
-                      </div>
-
-                      <ThumbStrip thumbs={thumbs} onOpen={(m) => onOpenViewer?.(session.id, m.id)} />
-
-                      <div className="mt-4 flex items-center justify-between">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            openNativePickerForSession(session);
-                          }}
-                          className="h-9 px-3 rounded-[999px] inline-flex items-center gap-2 active:scale-[0.99] transition-transform"
-                          style={{
-                            background: "rgba(0,0,0,0.04)",
-                            border: "1px solid var(--hairline)",
-                            color: "rgba(0,0,0,0.62)",
-                            fontFamily: "var(--font-sans)",
-                            WebkitTapHighlightColor: "transparent",
-                          }}
-                        >
-                          <ImagePlus className="w-4 h-4" />
-                          <span className="text-[11px] font-semibold uppercase" style={{ letterSpacing: "0.18em" }}>
-                            Add photos
-                          </span>
-                        </button>
-
-                        <div className="text-[11px]" style={{ color: "rgba(0,0,0,0.38)", fontFamily: "var(--font-sans)" }}>
-                          Tap card to open
-                        </div>
-                      </div>
-                    </ClickCard>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="pt-2 text-[13px]" style={{ color: "var(--muted)", fontFamily: "var(--font-sans)" }}>
-                No sessions yet.
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="h-10" />
       </div>
 
-      {/* Wedding date modal */}
-      {dateOpen && (
+      {/* Wedding date */}
+      <div className="px-6 mt-7">
+        <Label font={fontSans}>WEDDING DATE</Label>
+        <div className="mt-2 text-[13px]" style={{ color: "rgba(0,0,0,0.70)", fontFamily: fontSans }}>
+          {weddingDateText || ""}
+        </div>
+      </div>
+
+      {/* Consult call notes */}
+      <div className="px-6 mt-7">
+        <Label font={fontSans}>CONSULT CALL NOTES</Label>
         <div
-          className="fixed inset-0 z-[200] flex items-end md:items-center justify-center"
-          onClick={() => setDateOpen(false)}
-          style={{ background: "rgba(0,0,0,0.20)", backdropFilter: "blur(8px)" }}
+          className="mt-3"
+          style={{
+            borderRadius: 10,
+            border: `1px solid ${line}`,
+            background: "rgba(255,255,255,0.80)",
+          }}
         >
-          <div
-            className="w-full md:max-w-md mx-auto"
-            onClick={(e) => e.stopPropagation()}
+          <textarea
+            value={notesDraft}
+            onChange={(e) => setNotesDraft(e.target.value)}
+            onBlur={() => saveNotes(notesDraft)}
+            className="w-full bg-transparent outline-none text-[13px]"
+            rows={4}
+            placeholder="Add a note."
             style={{
-              background: "rgba(255,255,255,0.96)",
-              border: "1px solid rgba(0,0,0,0.08)",
-              borderRadius: 18,
-              boxShadow: "0 30px 80px -60px rgba(0,0,0,0.55)",
-              padding: 16,
-              margin: 16,
+              color: "rgba(0,0,0,0.80)",
+              padding: 14,
+              resize: "none",
+              fontFamily: fontSans,
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Sessions */}
+      <div className="px-6 mt-8">
+        <div className="flex items-center justify-between">
+          <Label font={fontSans}>SESSIONS</Label>
+          <button
+            onClick={onAddSession}
+            className="h-10 px-4 rounded-[999px] text-[12px] font-semibold tracking-[0.16em] uppercase active:scale-[0.99] transition-transform"
+            style={{
+              background: "rgba(255,255,255,0.76)",
+              border: `1px solid ${line}`,
+              color: "rgba(0,0,0,0.68)",
+              WebkitTapHighlightColor: "transparent",
+              fontFamily: fontSans,
             }}
           >
-            <div className="label-caps">Wedding date</div>
-
-            <input
-              type="date"
-              value={dateDraft}
-              onChange={(e) => setDateDraft(e.target.value)}
-              className="mt-3 w-full h-11 px-3 rounded-[12px] outline-none"
-              style={{
-                background: "rgba(0,0,0,0.03)",
-                border: "1px solid rgba(0,0,0,0.10)",
-                fontFamily: "var(--font-sans)",
-                color: "rgba(0,0,0,0.80)",
-              }}
-            />
-
-            <div className="mt-4 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={clearWeddingDate}
-                className="h-10 px-3 rounded-[12px] font-semibold uppercase"
-                style={{
-                  letterSpacing: "0.16em",
-                  background: "rgba(255,255,255,0.86)",
-                  border: "1px solid rgba(0,0,0,0.10)",
-                  color: "rgba(0,0,0,0.55)",
-                  fontSize: 12,
-                }}
-              >
-                Clear
-              </button>
-
-              <div className="flex-1" />
-
-              <button
-                type="button"
-                onClick={() => setDateOpen(false)}
-                className="h-10 px-3 rounded-[12px] font-semibold uppercase"
-                style={{
-                  letterSpacing: "0.16em",
-                  background: "rgba(255,255,255,0.86)",
-                  border: "1px solid rgba(0,0,0,0.10)",
-                  color: "rgba(0,0,0,0.72)",
-                  fontSize: 12,
-                }}
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={saveWeddingDate}
-                className="h-10 px-3 rounded-[12px] font-semibold uppercase"
-                style={{
-                  letterSpacing: "0.16em",
-                  background: "rgba(0,0,0,0.06)",
-                  border: "1px solid rgba(0,0,0,0.12)",
-                  color: "rgba(0,0,0,0.82)",
-                  fontSize: 12,
-                }}
-              >
-                Save
-              </button>
-            </div>
-          </div>
+            + ADD
+          </button>
         </div>
-      )}
+
+        <div className="mt-4 space-y-4">
+          {sessions.length ? (
+            sessions.map((session) => {
+              const media = Array.isArray(session?.media) ? session.media : [];
+              const thumbs = media.filter((m) => m?.url);
+              const count = thumbs.length;
+              const dateText = formatDateMMDDYYYY(session?.createdAt);
+
+              const sessionMenuItems = [
+                { label: "Share", icon: Share2, onClick: () => onShareSession?.(session) },
+                { label: "Delete session", icon: Trash2, danger: true, onClick: () => onDeleteSession?.(session) },
+              ].filter(Boolean);
+
+              const draft = titleDrafts?.[session.id] ?? (session.title || "");
+              const displayDraft = (draft || "").toString();
+
+              return (
+                <div
+                  key={session.id}
+                  className="p-4"
+                  style={{
+                    borderRadius: 12,
+                    border: `1px solid ${line}`,
+                    background: "rgba(255,255,255,0.82)",
+                  }}
+                >
+                  <button
+                    onClick={() => onOpenSession?.(session)}
+                    className="w-full text-left"
+                    style={{ WebkitTapHighlightColor: "transparent" }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <input
+                          ref={(el) => {
+                            if (el) sessionInputRefs.current[session.id] = el;
+                          }}
+                          value={displayDraft}
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onChange={(e) => setTitleDrafts((p) => ({ ...p, [session.id]: e.target.value }))}
+                          onBlur={() => commitSessionTitle(session)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              e.currentTarget.blur();
+                            }
+                          }}
+                          placeholder="Untitled"
+                          className="w-full bg-transparent outline-none"
+                          style={{
+                            fontFamily: fontSerif,
+                            color: "rgba(0,0,0,0.86)",
+                            fontWeight: 500,
+                            letterSpacing: "0.01em",
+                            fontSize: 18,
+                          }}
+                        />
+
+                        <div
+                          className="mt-1 text-[12px]"
+                          style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}
+                        >
+                          {dateText ? `${dateText} · ` : ""}
+                          {count} {count === 1 ? "photo" : "photos"}
+                        </div>
+                      </div>
+
+                      <div onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+                        <KebabMenu palette={{ ...palette, line }} items={sessionMenuItems} />
+                      </div>
+                    </div>
+
+                    {/* Film strip: flush to the CARD edge (not the screen edge) */}
+                    {thumbs.length ? (
+                      <div
+                        className="mt-4 -mx-4 overflow-x-auto pb-1 hide-scrollbar"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}
+                      >
+                        <div
+                          className="flex gap-2"
+                          style={{
+                            paddingLeft: 16, // match card padding (p-4)
+                            paddingRight: 0, // flush to the card edge
+                          }}
+                        >
+                          {thumbs.map((m) => (
+                            <button
+                              key={m.id}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onOpenViewer?.(session.id, m.id);
+                              }}
+                              className="shrink-0 overflow-hidden active:scale-[0.99] transition-transform"
+                              style={{
+                                width: 66,
+                                height: 66,
+                                borderRadius: 12,
+                                border: `1px solid rgba(0,0,0,0.08)`,
+                                background: "rgba(0,0,0,0.06)",
+                                WebkitTapHighlightColor: "transparent",
+                              }}
+                              aria-label="Open photo"
+                              title="Open photo"
+                            >
+                              <img
+                                src={m.thumbnailUrl || m.url}
+                                alt=""
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                                decoding="async"
+                                draggable={false}
+                              />
+                            </button>
+                          ))}
+                        </div>
+
+                        <style>{`.hide-scrollbar::-webkit-scrollbar{ display:none; }`}</style>
+                      </div>
+                    ) : null}
+
+                    <div className="mt-4 flex items-center justify-between">
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          openNativePickerForSession(session);
+                        }}
+                        className="inline-flex items-center gap-2 px-4 h-11 text-[12px] font-semibold tracking-[0.12em] uppercase active:scale-[0.99] transition-transform"
+                        style={{
+                          borderRadius: 999,
+                          border: `1px solid ${line}`,
+                          color: "rgba(0,0,0,0.78)",
+                          background: "rgba(255,255,255,0.75)",
+                          fontFamily: fontSans,
+                          WebkitTapHighlightColor: "transparent",
+                        }}
+                      >
+                        +&nbsp; ADD PHOTOS
+                      </button>
+
+                      <div className="text-[12px]" style={{ color: "rgba(0,0,0,0.40)", fontFamily: fontSans }}>
+                        Tap card to open
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              );
+            })
+          ) : (
+            <div className="text-[13px]" style={{ color: "rgba(0,0,0,0.50)", fontFamily: fontSans }}>
+              No sessions yet.
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

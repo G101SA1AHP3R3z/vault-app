@@ -1,6 +1,6 @@
 // /src/App.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, MoreHorizontal } from "lucide-react";
+import { Loader2, MoreHorizontal, Share2, Trash2, ImagePlus } from "lucide-react";
 
 import { VaultProvider, useVault } from "./context/VaultContext";
 
@@ -90,23 +90,65 @@ function SessionDetailView({
   onDeleteSession,
   onShareSession,
   onUpdateSessionNotes,
+  onAddPhotosNative, // (session, FileList|File[]) => Promise
 }) {
   const fontSerif = headerFont;
   const fontSans = bodyFont;
 
   const line = palette?.line || "rgba(0,0,0,0.10)";
+  const hair = "rgba(0,0,0,0.06)";
+
   const media = Array.isArray(session?.media) ? session.media : [];
   const thumbs = media.filter((m) => m?.url);
   const count = thumbs.length;
 
   const dateText = formatDateMMDDYYYY(session?.createdAt);
 
-  // Notes autosave
+  // ------- kebab menu (no prompt) -------
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const onDown = (e) => {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown);
+    return () => window.removeEventListener("pointerdown", onDown);
+  }, []);
+
+  const menuItems = [
+    onShareSession ? { label: "Share", icon: Share2, onClick: () => onShareSession?.(session) } : null,
+    onDeleteSession
+      ? { label: "Delete session", icon: Trash2, danger: true, onClick: () => onDeleteSession?.(session) }
+      : null,
+  ].filter(Boolean);
+
+  // ------- add photos (native picker) -------
+  const fileRef = useRef(null);
+
+  const openPicker = () => {
+    if (fileRef.current) fileRef.current.value = "";
+    fileRef.current?.click?.();
+  };
+
+  const onPicked = async (e) => {
+    const files = e?.target?.files;
+    if (!files || !files.length) return;
+    try {
+      await onAddPhotosNative?.(session, files);
+    } catch (err) {
+      console.error(err);
+      alert(err?.message || "Could not add photos.");
+    } finally {
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  // ------- session notes: collapsed 3 lines + expand -------
   const [draft, setDraft] = useState((session?.notesText || "").toString());
   const lastSavedRef = useRef((session?.notesText || "").toString());
   const timerRef = useRef(null);
-
-  // Expand/collapse
   const [expanded, setExpanded] = useState(false);
 
   const taRef = useRef(null);
@@ -163,16 +205,19 @@ function SessionDetailView({
     }
   };
 
+  const hasNotes = (draft || "").trim().length > 0;
+
   const calcNoteCountForMedia = (m) => {
     const general = (mediaNotesById?.[m?.id]?.text || "").trim() ? 1 : 0;
     const hotspots = Array.isArray(m?.hotspots) ? m.hotspots.length : 0;
     return general + hotspots;
   };
 
-  const hasNotes = (draft || "").trim().length > 0;
-
   return (
     <div className="pt-2 pb-28">
+      {/* hidden picker */}
+      <input ref={fileRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={onPicked} />
+
       {/* Title row: title + kebab aligned */}
       <div className="px-6 mt-2 flex items-start justify-between gap-3">
         <div
@@ -188,36 +233,97 @@ function SessionDetailView({
           {session?.title?.trim() || "Untitled"}
         </div>
 
+        {menuItems.length ? (
+          <div ref={menuRef} className="relative shrink-0">
+            <button
+              type="button"
+              className="w-10 h-10 rounded-[12px] inline-flex items-center justify-center active:scale-[0.98] transition-transform"
+              style={{
+                background: "rgba(255,255,255,0.78)",
+                border: `1px solid ${line}`,
+                color: "rgba(0,0,0,0.75)",
+                WebkitTapHighlightColor: "transparent",
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen((v) => !v);
+              }}
+              aria-label="More"
+              title="More"
+            >
+              <MoreHorizontal className="w-4 h-4" />
+            </button>
+
+            {menuOpen && (
+              <div
+                className="absolute right-0 mt-2 w-56 overflow-hidden z-50"
+                style={{
+                  borderRadius: 12,
+                  background: "rgba(255,255,255,0.94)",
+                  border: `1px solid ${hair}`,
+                  boxShadow: "0 18px 45px -38px rgba(0,0,0,0.45)",
+                  backdropFilter: "blur(18px)",
+                }}
+              >
+                {menuItems.map((it, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setMenuOpen(false);
+                      it?.onClick?.();
+                    }}
+                    className="w-full px-4 py-3 flex items-center gap-3 text-[13px] font-semibold text-left"
+                    style={{
+                      color: it?.danger ? "rgba(255,77,46,0.95)" : "rgba(0,0,0,0.82)",
+                      background: "transparent",
+                      fontFamily: fontSans,
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(0,0,0,0.04)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    {it?.icon ? <it.icon className="w-4 h-4" /> : null}
+                    {it?.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Meta row + Add Photos */}
+      <div className="px-6 mt-2 flex items-center justify-between gap-3">
+        <div className="text-[12px]" style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}>
+          {dateText ? `${dateText} · ` : ""}
+          {count} {count === 1 ? "photo" : "photos"}
+        </div>
+
         <button
-          className="w-10 h-10 rounded-[12px] inline-flex items-center justify-center active:scale-[0.98] transition-transform shrink-0"
+          type="button"
+          onClick={openPicker}
+          className="h-9 px-3 rounded-[999px] inline-flex items-center gap-2 active:scale-[0.99] transition-transform"
           style={{
             background: "rgba(255,255,255,0.78)",
             border: `1px solid ${line}`,
-            color: "rgba(0,0,0,0.75)",
+            color: "rgba(0,0,0,0.70)",
+            fontFamily: fontSans,
             WebkitTapHighlightColor: "transparent",
           }}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const action = window.prompt('Type: "share" or "delete"');
-            if (action === "share") onShareSession?.(session);
-            if (action === "delete") onDeleteSession?.(session);
-          }}
-          aria-label="More"
-          title="More"
-          type="button"
+          aria-label="Add photos"
+          title="Add photos"
         >
-          <MoreHorizontal className="w-4 h-4" />
+          <ImagePlus className="w-4 h-4" />
+          <span className="text-[12px] font-semibold uppercase" style={{ letterSpacing: "0.16em" }}>
+            Add photos
+          </span>
         </button>
       </div>
 
-      {/* Meta */}
-      <div className="px-6 mt-2 text-[12px]" style={{ color: "rgba(0,0,0,0.45)", fontFamily: fontSans }}>
-        {dateText ? `${dateText} · ` : ""}
-        {count} {count === 1 ? "photo" : "photos"}
-      </div>
-
-      {/* Thumbnails */}
+      {/* thumbnails */}
       <div className="px-6 mt-6">
         <div className="grid grid-cols-2 gap-3">
           {thumbs.map((m) => {
@@ -257,7 +363,7 @@ function SessionDetailView({
         </div>
       </div>
 
-      {/* Session notes: preview + expand */}
+      {/* Session notes */}
       <div className="px-6 mt-8">
         <div
           className="text-[11px] font-semibold uppercase tracking-[0.18em]"
@@ -291,7 +397,7 @@ function SessionDetailView({
                 className="h-9 px-3 rounded-[999px] inline-flex items-center active:scale-[0.99] transition-transform"
                 style={{
                   background: "rgba(255,255,255,0.78)",
-                  border: "1px solid rgba(0,0,0,0.10)",
+                  border: `1px solid ${line}`,
                   color: "rgba(0,0,0,0.70)",
                   fontFamily: fontSans,
                   WebkitTapHighlightColor: "transparent",
@@ -345,7 +451,7 @@ function SessionDetailView({
                 className="h-9 px-3 rounded-[999px] inline-flex items-center active:scale-[0.99] transition-transform"
                 style={{
                   background: "rgba(255,255,255,0.78)",
-                  border: "1px solid rgba(0,0,0,0.10)",
+                  border: `1px solid ${line}`,
                   color: "rgba(0,0,0,0.70)",
                   fontFamily: fontSans,
                   WebkitTapHighlightColor: "transparent",
@@ -402,7 +508,6 @@ function VaultShell() {
     upsertMediaNote,
 
     addProject,
-    updateProjectWeddingDate,
     renameProject,
     updateProjectBrief,
     archiveProject,
@@ -410,7 +515,6 @@ function VaultShell() {
 
     addSession,
     renameSession,
-    updateSessionNotes,
     deleteSession,
 
     addMediaFilesToProject,
@@ -472,14 +576,9 @@ function VaultShell() {
   }, [activeProject?.sessions, activeSessionId]);
 
   // --------- Create Project ----------
-  const handleCreateProject = async ({ title, note, weddingDate }) => {
+  const handleCreateProject = async ({ title, note }) => {
     try {
-      const p = await addProject({
-        title: (title || "Untitled").trim(),
-        note: (note || "").trim(),
-        weddingDate: weddingDate || null,
-      });
-
+      const p = await addProject({ title: (title || "Untitled").trim(), note: (note || "").trim() });
       setNewOpen(false);
       setActiveProject(p);
       setView("project");
@@ -651,7 +750,10 @@ function VaultShell() {
                     className="w-full px-4 py-3 rounded-[14px]"
                     style={{ background: "rgba(255,255,255,0.70)", border: `1px solid ${palette.line}` }}
                   >
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: "rgba(0,0,0,0.45)" }}>
+                    <div
+                      className="text-[11px] font-semibold uppercase tracking-[0.18em]"
+                      style={{ color: "rgba(0,0,0,0.45)" }}
+                    >
                       Search
                     </div>
                     <input
@@ -668,7 +770,10 @@ function VaultShell() {
                   </div>
 
                   <div className="mt-6">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: "rgba(0,0,0,0.45)" }}>
+                    <div
+                      className="text-[11px] font-semibold uppercase tracking-[0.18em]"
+                      style={{ color: "rgba(0,0,0,0.45)" }}
+                    >
                       Results
                     </div>
                     <div className="mt-3">
@@ -693,7 +798,6 @@ function VaultShell() {
               onEditProject={editProject}
               onShareProject={shareProject}
               onArchiveProject={removeProject}
-              onUpdateWeddingDate={(d) => updateProjectWeddingDate?.(activeProject.id, d)}
               onOpenViewer={mediaNav.openViewer}
               onOpenSession={openSessionDetail}
               onAddSession={openAddSession}
@@ -719,6 +823,7 @@ function VaultShell() {
               onDeleteSession={removeSession}
               onShareSession={shareSession}
               onUpdateSessionNotes={(text) => updateSessionNotes?.(activeProject.id, activeSession.id, text)}
+              onAddPhotosNative={addPhotosNative}
             />
           )}
 

@@ -50,7 +50,11 @@ function SectionHeader({ title, right }) {
   return (
     <div className="flex items-baseline justify-between" style={{ marginTop: 18 }}>
       <div className="label-caps">{title}</div>
-      {right ? <div className="text-[12px]" style={{ color: "var(--muted)" }}>{right}</div> : null}
+      {right ? (
+        <div className="text-[12px]" style={{ color: "var(--muted)" }}>
+          {right}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -222,16 +226,19 @@ export default function LibraryGrid({ title = "Projects", onNew }) {
       <div className="px-6">
         {continueProjects.length > 0 ? (
           <div className="mb-7">
-            <SectionHeader title="Continue" />
+            <SectionHeader title="Recent" />
+
+            {/* Full-bleed to the RIGHT edge (no weird inset margin) */}
             <div
-              className="mt-4 flex gap-3 overflow-x-auto pb-2"
+              className="mt-4 flex gap-3 overflow-x-auto pb-2 -mr-6"
               style={{
+                width: "calc(100% + 24px)",
                 scrollbarWidth: "none",
                 WebkitOverflowScrolling: "touch",
               }}
             >
               <style>{`.hide-scroll::-webkit-scrollbar{ display:none; }`}</style>
-              <div className="flex gap-3 hide-scroll">
+              <div className="flex gap-3 hide-scroll" style={{ paddingRight: 0 }}>
                 {continueProjects.map((p) => (
                   <ContinueCard key={p.id} project={p} onOpen={openProject} />
                 ))}
